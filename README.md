@@ -1,6 +1,18 @@
 # @fozooni/nestjs-storage
 
+[![CI](https://github.com/fozooni/nestjs-storage/actions/workflows/ci.yml/badge.svg)](https://github.com/fozooni/nestjs-storage/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/@fozooni/nestjs-storage.svg)](https://www.npmjs.com/package/@fozooni/nestjs-storage)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, and Google Cloud Storage.
+
+## Compatibility
+
+| @fozooni/nestjs-storage | NestJS    | Node.js        |
+|-------------------------|-----------|----------------|
+| `0.x`                   | 10 \| 11  | 18, 20, 22     |
+
+> Tested on every push via [GitHub Actions CI](https://github.com/fozooni/nestjs-storage/actions/workflows/ci.yml) against Node 18, 20, and 22.
 
 ## Features
 
@@ -16,6 +28,7 @@ A powerful, driver-based storage module for NestJS with a unified API across Loc
 
 ## Table of Contents
 
+- [Compatibility](#compatibility)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Module Registration](#module-registration)
