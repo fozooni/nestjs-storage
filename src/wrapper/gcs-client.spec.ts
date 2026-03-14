@@ -59,9 +59,7 @@ describe('GcsClientWrapper', () => {
 
   describe('constructor', () => {
     it('should throw if bucket is missing', () => {
-      expect(
-        () => new GcsClientWrapper({ driver: 'gcs' }),
-      ).toThrow('GCS bucket is required');
+      expect(() => new GcsClientWrapper({ driver: 'gcs' })).toThrow('GCS bucket is required');
     });
 
     it('should create with valid config', () => {
@@ -109,13 +107,15 @@ describe('GcsClientWrapper', () => {
   describe('getObject', () => {
     it('should get object with metadata', async () => {
       const mockStream = { pipe: jest.fn() };
-      mockGetMetadata.mockResolvedValue([{
-        metadata: { custom: 'value' },
-        contentType: 'text/plain',
-        size: '100',
-        updated: '2024-01-01T00:00:00Z',
-        etag: '"etag"',
-      }]);
+      mockGetMetadata.mockResolvedValue([
+        {
+          metadata: { custom: 'value' },
+          contentType: 'text/plain',
+          size: '100',
+          updated: '2024-01-01T00:00:00Z',
+          etag: '"etag"',
+        },
+      ]);
       mockCreateReadStream.mockReturnValue(mockStream);
 
       const result = await client.getObject('file.txt');
@@ -129,13 +129,15 @@ describe('GcsClientWrapper', () => {
 
   describe('headObject', () => {
     it('should return metadata without body', async () => {
-      mockGetMetadata.mockResolvedValue([{
-        metadata: { custom: 'value' },
-        contentType: 'application/pdf',
-        size: '5000',
-        updated: '2024-06-15T12:00:00Z',
-        etag: '"head-etag"',
-      }]);
+      mockGetMetadata.mockResolvedValue([
+        {
+          metadata: { custom: 'value' },
+          contentType: 'application/pdf',
+          size: '5000',
+          updated: '2024-06-15T12:00:00Z',
+          etag: '"head-etag"',
+        },
+      ]);
 
       const result = await client.headObject('doc.pdf');
       expect(result.contentType).toBe('application/pdf');
@@ -144,9 +146,11 @@ describe('GcsClientWrapper', () => {
     });
 
     it('should handle missing updated field', async () => {
-      mockGetMetadata.mockResolvedValue([{
-        size: '0',
-      }]);
+      mockGetMetadata.mockResolvedValue([
+        {
+          size: '0',
+        },
+      ]);
 
       const result = await client.headObject('file.txt');
       expect(result.lastModified).toBeUndefined();
@@ -176,8 +180,14 @@ describe('GcsClientWrapper', () => {
     it('should list objects', async () => {
       mockGetFiles.mockResolvedValue([
         [
-          { name: 'file1.txt', metadata: { size: '100', updated: '2024-01-01T00:00:00Z', etag: '"e1"' } },
-          { name: 'file2.txt', metadata: { size: '200', updated: '2024-01-02T00:00:00Z', etag: '"e2"' } },
+          {
+            name: 'file1.txt',
+            metadata: { size: '100', updated: '2024-01-01T00:00:00Z', etag: '"e1"' },
+          },
+          {
+            name: 'file2.txt',
+            metadata: { size: '200', updated: '2024-01-02T00:00:00Z', etag: '"e2"' },
+          },
         ],
         null,
         { prefixes: ['dir/'] },

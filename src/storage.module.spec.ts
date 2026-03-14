@@ -102,9 +102,7 @@ describe('StorageModule', () => {
       // Pass it through imports as a dynamic module
       const configModule = {
         module: class ConfigModule {},
-        providers: [
-          { provide: CONFIG_TOKEN, useValue: { storagePath: '/custom/path' } },
-        ],
+        providers: [{ provide: CONFIG_TOKEN, useValue: { storagePath: '/custom/path' } }],
         exports: [CONFIG_TOKEN],
       };
 
@@ -157,9 +155,7 @@ describe('StorageModule', () => {
       // Pass it through imports as a dynamic module
       const factoryModule = {
         module: class TestFactoryModule {},
-        providers: [
-          { provide: ExistingOptionsFactory, useValue: new ExistingOptionsFactory() },
-        ],
+        providers: [{ provide: ExistingOptionsFactory, useValue: new ExistingOptionsFactory() }],
         exports: [ExistingOptionsFactory],
       };
 
@@ -177,9 +173,9 @@ describe('StorageModule', () => {
     });
 
     it('should throw if no option method is provided', () => {
-      expect(() =>
-        StorageModule.forRootAsync({} as any),
-      ).toThrow('StorageModule.forRootAsync() requires one of: useFactory, useClass, or useExisting');
+      expect(() => StorageModule.forRootAsync({} as any)).toThrow(
+        'StorageModule.forRootAsync() requires one of: useFactory, useClass, or useExisting',
+      );
     });
   });
 });

@@ -345,9 +345,7 @@ describe('GcsDisk', () => {
     it('should generate presigned URL with expiration seconds', async () => {
       const url = await disk.temporaryUrl('file.txt', 3600);
       expect(url).toBe('https://signed.url');
-      expect(mockGetPresignedUrl).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'read' }),
-      );
+      expect(mockGetPresignedUrl).toHaveBeenCalledWith(expect.objectContaining({ action: 'read' }));
     });
 
     it('should generate presigned URL with expiration date', async () => {
@@ -510,9 +508,7 @@ describe('GcsDisk', () => {
       const { uploadId } = await disk.initMultipartUpload('file.txt');
 
       expect(await disk.abortMultipartUpload(uploadId, 'file.txt')).toBe(true);
-      expect(mockDeletePrefix).toHaveBeenCalledWith(
-        expect.stringContaining('.__multipart/'),
-      );
+      expect(mockDeletePrefix).toHaveBeenCalledWith(expect.stringContaining('.__multipart/'));
     });
   });
 

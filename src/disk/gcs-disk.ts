@@ -106,6 +106,7 @@ export class GcsDisk implements FilesystemContract {
       }
 
       return true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (this.config.throw !== false) {
         throw new Error(`GCS upload failed for key "${key}": ${error.message}`);
@@ -114,6 +115,7 @@ export class GcsDisk implements FilesystemContract {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async putFile(path: string, file: any, options?: PutOptions): Promise<string | false> {
     let contents: Buffer | NodeJS.ReadableStream;
     let filename: string;
@@ -140,6 +142,7 @@ export class GcsDisk implements FilesystemContract {
 
   async putFileAs(
     path: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     file: any,
     name: string,
     options?: PutOptions,
@@ -564,6 +567,7 @@ export class GcsDisk implements FilesystemContract {
 
   async putFileMultipart(
     path: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     file: any,
     options?: MultipartUploadOptions,
   ): Promise<string | false> {

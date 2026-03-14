@@ -104,9 +104,7 @@ describe('R2Disk', () => {
   describe('url', () => {
     it('should throw if no custom URL configured', () => {
       const disk = new R2Disk(baseConfig);
-      expect(() => disk.url('file.txt')).toThrow(
-        'R2 does not provide default public URLs',
-      );
+      expect(() => disk.url('file.txt')).toThrow('R2 does not provide default public URLs');
     });
 
     it('should return custom URL when configured', () => {

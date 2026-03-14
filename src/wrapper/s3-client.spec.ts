@@ -12,22 +12,14 @@ jest.mock('@aws-sdk/client-s3', () => {
     PutObjectCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'put' })),
     GetObjectCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'get' })),
     HeadObjectCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'head' })),
-    DeleteObjectCommand: jest
-      .fn()
-      .mockImplementation((params) => ({ ...params, _type: 'delete' })),
+    DeleteObjectCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'delete' })),
     DeleteObjectsCommand: jest
       .fn()
       .mockImplementation((params) => ({ ...params, _type: 'deleteMany' })),
-    ListObjectsV2Command: jest
-      .fn()
-      .mockImplementation((params) => ({ ...params, _type: 'list' })),
+    ListObjectsV2Command: jest.fn().mockImplementation((params) => ({ ...params, _type: 'list' })),
     CopyObjectCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'copy' })),
-    GetObjectAclCommand: jest
-      .fn()
-      .mockImplementation((params) => ({ ...params, _type: 'getAcl' })),
-    PutObjectAclCommand: jest
-      .fn()
-      .mockImplementation((params) => ({ ...params, _type: 'putAcl' })),
+    GetObjectAclCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'getAcl' })),
+    PutObjectAclCommand: jest.fn().mockImplementation((params) => ({ ...params, _type: 'putAcl' })),
     CreateMultipartUploadCommand: jest
       .fn()
       .mockImplementation((params) => ({ ...params, _type: 'createMultipart' })),
@@ -186,8 +178,20 @@ describe('S3ClientWrapper', () => {
     it('should list objects with prefix', async () => {
       mockSend.mockResolvedValue({
         Contents: [
-          { Key: 'dir/file1.txt', Size: 100, LastModified: new Date(), ETag: '"e1"', StorageClass: 'STANDARD' },
-          { Key: 'dir/file2.txt', Size: 200, LastModified: new Date(), ETag: '"e2"', StorageClass: 'STANDARD' },
+          {
+            Key: 'dir/file1.txt',
+            Size: 100,
+            LastModified: new Date(),
+            ETag: '"e1"',
+            StorageClass: 'STANDARD',
+          },
+          {
+            Key: 'dir/file2.txt',
+            Size: 200,
+            LastModified: new Date(),
+            ETag: '"e2"',
+            StorageClass: 'STANDARD',
+          },
         ],
         CommonPrefixes: [{ Prefix: 'dir/sub/' }],
         NextContinuationToken: undefined,
@@ -325,9 +329,9 @@ describe('S3ClientWrapper', () => {
 
     it('should throw if UploadId is not returned', async () => {
       mockSend.mockResolvedValue({});
-      await expect(
-        client.createMultipartUpload({ key: 'file.txt' }),
-      ).rejects.toThrow('Failed to initialize multipart upload');
+      await expect(client.createMultipartUpload({ key: 'file.txt' })).rejects.toThrow(
+        'Failed to initialize multipart upload',
+      );
     });
 
     it('should upload part', async () => {

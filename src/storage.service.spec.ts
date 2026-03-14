@@ -26,7 +26,9 @@ function createMockDisk(overrides: Partial<FilesystemContract> = {}): Filesystem
     temporaryUrl: jest.fn().mockResolvedValue('https://signed.url'),
     prepend: jest.fn().mockResolvedValue(true),
     append: jest.fn().mockResolvedValue(true),
-    getMetadata: jest.fn().mockResolvedValue({ path: 'file.txt', size: 100, lastModified: new Date() }),
+    getMetadata: jest
+      .fn()
+      .mockResolvedValue({ path: 'file.txt', size: 100, lastModified: new Date() }),
     mimeType: jest.fn().mockResolvedValue('text/plain'),
     directorySize: jest.fn().mockResolvedValue(5000),
     initMultipartUpload: jest.fn().mockResolvedValue({ uploadId: 'mpu-1', key: 'file.txt' }),
@@ -66,7 +68,14 @@ const defaultConfig = {
   disks: {
     local: { driver: 'local' as const, root: '/tmp/storage' },
     s3: { driver: 's3' as const, bucket: 's3-bucket', region: 'us-east-1', key: 'k', secret: 's' },
-    r2: { driver: 'r2' as const, bucket: 'r2-bucket', region: 'auto', key: 'k', secret: 's', accountId: 'acc' },
+    r2: {
+      driver: 'r2' as const,
+      bucket: 'r2-bucket',
+      region: 'auto',
+      key: 'k',
+      secret: 's',
+      accountId: 'acc',
+    },
     gcs: { driver: 'gcs' as const, bucket: 'gcs-bucket', projectId: 'p' },
   },
 };
@@ -135,7 +144,13 @@ describe('StorageService', () => {
       const config = {
         default: 'local',
         disks: {
-          main: { driver: 's3' as const, bucket: 'main', region: 'us-east-1', key: 'k', secret: 's' },
+          main: {
+            driver: 's3' as const,
+            bucket: 'main',
+            region: 'us-east-1',
+            key: 'k',
+            secret: 's',
+          },
           local: { driver: 'local' as const, root: '/tmp' },
         },
       };
@@ -153,9 +168,7 @@ describe('StorageService', () => {
     });
 
     it('should throw for unsupported driver', () => {
-      expect(() => service.build({ driver: 'unknown' })).toThrow(
-        'Driver [unknown] not supported',
-      );
+      expect(() => service.build({ driver: 'unknown' })).toThrow('Driver [unknown] not supported');
     });
   });
 

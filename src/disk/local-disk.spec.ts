@@ -92,6 +92,7 @@ describe('LocalDisk', () => {
 
   describe('path traversal protection', () => {
     it('should throw on path traversal', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect(() => (disk as any).resolvePath('../../etc/passwd')).toThrow(
         'Path traversal detected',
       );

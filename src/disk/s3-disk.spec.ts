@@ -65,9 +65,9 @@ describe('S3Disk', () => {
     });
 
     it('should throw if region is missing', () => {
-      expect(
-        () => new S3Disk({ driver: 's3', bucket: 'b', key: 'k', secret: 's' }),
-      ).toThrow('S3 configuration missing required fields: region');
+      expect(() => new S3Disk({ driver: 's3', bucket: 'b', key: 'k', secret: 's' })).toThrow(
+        'S3 configuration missing required fields: region',
+      );
     });
   });
 
@@ -129,9 +129,7 @@ describe('S3Disk', () => {
     it('should put string content', async () => {
       const result = await disk.put('file.txt', 'hello');
       expect(result).toBe(true);
-      expect(mockPutObject).toHaveBeenCalledWith(
-        expect.objectContaining({ Key: 'file.txt' }),
-      );
+      expect(mockPutObject).toHaveBeenCalledWith(expect.objectContaining({ Key: 'file.txt' }));
     });
 
     it('should put buffer content', async () => {
@@ -179,9 +177,7 @@ describe('S3Disk', () => {
 
     it('should sanitize leading slashes from path', async () => {
       await disk.put('/file.txt', 'data');
-      expect(mockPutObject).toHaveBeenCalledWith(
-        expect.objectContaining({ Key: 'file.txt' }),
-      );
+      expect(mockPutObject).toHaveBeenCalledWith(expect.objectContaining({ Key: 'file.txt' }));
     });
   });
 

@@ -192,9 +192,7 @@ describe('storage.utils', () => {
 
   describe('encodeS3Key', () => {
     it('should encode special characters in each segment', () => {
-      expect(encodeS3Key('path/to/file with spaces.txt')).toBe(
-        'path/to/file%20with%20spaces.txt',
-      );
+      expect(encodeS3Key('path/to/file with spaces.txt')).toBe('path/to/file%20with%20spaces.txt');
     });
 
     it('should preserve forward slashes', () => {
