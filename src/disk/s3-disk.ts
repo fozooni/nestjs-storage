@@ -2,8 +2,12 @@ import { Readable } from 'stream';
 
 import { ObjectCannedACL } from '@aws-sdk/client-s3';
 
+import { createHash } from 'crypto';
+
 import {
+  ChecksumAlgorithm,
   CopyOptions,
+  DeleteManyResult,
   DiskConfig,
   FileMetadata,
   FilesystemContract,
@@ -683,5 +687,65 @@ export class S3Disk implements FilesystemContract {
    */
   getBucket(): string {
     return this.client.getBucket();
+  }
+
+  async missing(path: string): Promise<boolean> {
+    return !(await this.exists(path));
+  }
+
+  async json<T = unknown>(path: string): Promise<T> {
+    const content = await this.get(path, { responseType: 'string' });
+    return JSON.parse(content as string);
+  }
+
+  async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {
+    const key = sanitizePath(path);
+
+    // For md5, try to use S3's ETag (it's the MD5 for single-part uploads)
+    if (algorithm === 'md5') {
+      const head = await this.client.headObject(key);
+      const etag = head.etag;
+      if (etag) {
+        const cleanEtag = etag.replace(/"/g, '');
+        // ETag for multipart uploads contains a dash — fall back to download
+        if (!cleanEtag.includes('-')) {
+          return cleanEtag;
+        }
+      }
+    }
+
+    // Fallback: download and compute hash
+    const content = await this.get(path);
+    const hash = createHash(algorithm);
+    hash.update(content as Buffer);
+    return hash.digest('hex');
+  }
+
+  async deleteMany(paths: string[]): Promise<DeleteManyResult> {
+    if (paths.length === 0) {
+      return { succeeded: [], failed: [] };
+    }
+
+    const keys = paths.map(sanitizePath);
+
+    try {
+      await this.client.deleteObjects(keys);
+      return { succeeded: [...paths], failed: [] };
+    } catch {
+      // If batch delete fails, fall back to individual deletes
+      const succeeded: string[] = [];
+      const failed: string[] = [];
+
+      for (const filePath of paths) {
+        try {
+          await this.delete(filePath);
+          succeeded.push(filePath);
+        } catch {
+          failed.push(filePath);
+        }
+      }
+
+      return { succeeded, failed };
+    }
   }
 }

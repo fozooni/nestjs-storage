@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, StreamableFile } from '@nestjs/common';
+import { Readable } from 'stream';
 
 import { STORAGE_MODULE_OPTIONS } from './constants';
 import { LocalDisk } from './disk/local-disk';
@@ -6,7 +7,9 @@ import { S3Disk } from './disk/s3-disk';
 import { R2Disk } from './disk/r2-disk';
 import { GcsDisk } from './disk/gcs-disk';
 import type {
+  ChecksumAlgorithm,
   CopyOptions,
+  DeleteManyResult,
   DiskConfig,
   FileMetadata,
   FilesystemContract,
@@ -18,8 +21,10 @@ import type {
   PutOptions,
   StorageConfig,
   StorageManager,
+  StreamableFileOptions,
   TemporaryUrlOptions,
 } from './interfaces/storage.interface';
+import { getFilename } from './utils/storage.utils';
 
 @Injectable()
 export class StorageService implements StorageManager {
@@ -104,6 +109,10 @@ export class StorageService implements StorageManager {
 
   extend(driver: string, callback: (config: DiskConfig) => FilesystemContract): void {
     this.registerDriver(driver, callback);
+  }
+
+  setDisk(name: string, disk: FilesystemContract): void {
+    this.disks.set(name, disk);
   }
 
   // Proxy methods to default disk
@@ -275,5 +284,58 @@ export class StorageService implements StorageManager {
       throw new Error('Disk does not support multipart upload');
     }
     return disk.putFileMultipart(path, file, options);
+  }
+
+  // Convenience method proxies
+  async missing(path: string): Promise<boolean> {
+    const disk = this.disk();
+    if (!disk.missing) {
+      throw new Error('Disk does not support missing()');
+    }
+    return disk.missing(path);
+  }
+
+  async json<T = unknown>(path: string): Promise<T> {
+    const disk = this.disk();
+    if (!disk.json) {
+      throw new Error('Disk does not support json()');
+    }
+    return disk.json<T>(path);
+  }
+
+  async checksum(path: string, algorithm?: ChecksumAlgorithm): Promise<string> {
+    const disk = this.disk();
+    if (!disk.checksum) {
+      throw new Error('Disk does not support checksum()');
+    }
+    return disk.checksum(path, algorithm);
+  }
+
+  async deleteMany(paths: string[]): Promise<DeleteManyResult> {
+    const disk = this.disk();
+    if (!disk.deleteMany) {
+      throw new Error('Disk does not support deleteMany()');
+    }
+    return disk.deleteMany(paths);
+  }
+
+  // Streamable file for NestJS controllers
+  async getStreamableFile(path: string, options?: StreamableFileOptions): Promise<StreamableFile> {
+    const disk = this.disk();
+
+    const [stream, mime, fileSize] = await Promise.all([
+      disk.get(path, { responseType: 'stream' }),
+      disk.mimeType(path),
+      disk.size(path),
+    ]);
+
+    const filename = options?.filename ?? getFilename(path);
+    const disposition = options?.disposition ?? 'attachment';
+
+    return new StreamableFile(stream as Readable, {
+      type: mime,
+      length: fileSize,
+      disposition: `${disposition}; filename="${filename}"`,
+    });
   }
 }

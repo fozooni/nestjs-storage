@@ -5,7 +5,9 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 
 import {
+  ChecksumAlgorithm,
   CopyOptions,
+  DeleteManyResult,
   DiskConfig,
   FileMetadata,
   FilesystemContract,
@@ -466,6 +468,47 @@ export class LocalDisk implements FilesystemContract {
    */
   getBucket(): string | undefined {
     return undefined;
+  }
+
+  async missing(path: string): Promise<boolean> {
+    return !(await this.exists(path));
+  }
+
+  async json<T = unknown>(path: string): Promise<T> {
+    const content = await this.get(path, { responseType: 'string' });
+    return JSON.parse(content as string);
+  }
+
+  async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {
+    const fullPath = this.resolvePath(path);
+    const hash = createHash(algorithm);
+    const stream = createReadStream(fullPath);
+
+    return new Promise((resolve, reject) => {
+      stream.on('data', (chunk: Buffer) => hash.update(chunk));
+      stream.on('end', () => resolve(hash.digest('hex')));
+      stream.on('error', reject);
+    });
+  }
+
+  async deleteMany(paths: string[]): Promise<DeleteManyResult> {
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+
+    for (const filePath of paths) {
+      try {
+        const result = await this.delete(filePath);
+        if (result) {
+          succeeded.push(filePath);
+        } else {
+          failed.push(filePath);
+        }
+      } catch {
+        failed.push(filePath);
+      }
+    }
+
+    return { succeeded, failed };
   }
 
   // Multipart upload support via temp directory concatenation

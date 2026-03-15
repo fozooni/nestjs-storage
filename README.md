@@ -25,8 +25,13 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 - **4 Built-in Drivers** — Local, S3, R2 (Cloudflare), GCS (Google Cloud)
 - **NestJS Dynamic Module** — `forRoot()` and `forRootAsync()` registration
 - **Global Module** — Inject `StorageService` anywhere without importing
+- **`@InjectDisk()` Decorator** — Inject specific disks directly into your services
 - **Multiple Disks** — Configure and switch between multiple storage disks at runtime
 - **Multipart Uploads** — Chunked uploads for large files on all drivers
+- **Convenience Methods** — `missing()`, `json()`, `checksum()`, `deleteMany()` built-in
+- **Streamable Downloads** — `getStreamableFile()` for NestJS controller responses
+- **Health Checks** — `StorageHealthIndicator` for `@nestjs/terminus` integration
+- **Testing Utilities** — `FakeDisk` in-memory driver and `StorageTestUtils` for tests
 - **Custom Drivers** — Extend with your own storage driver via `extend()`
 - **Dual CJS/ESM** — Ships both CommonJS and ES modules with TypeScript declarations
 - **Optional Peer Dependencies** — Only install the SDK you need
@@ -54,7 +59,10 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
     - [GCS Driver (Google Cloud)](#gcs-driver-google-cloud)
   - [Usage](#usage)
     - [Injecting the Service](#injecting-the-service)
+    - [Injecting a Specific Disk](#injecting-a-specific-disk)
     - [File Operations](#file-operations)
+    - [Convenience Methods](#convenience-methods)
+    - [Streaming Downloads](#streaming-downloads)
     - [Directory Operations](#directory-operations)
     - [Visibility](#visibility)
     - [URLs](#urls)
@@ -63,10 +71,17 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
     - [Multiple Disks](#multiple-disks)
     - [Disk by Bucket](#disk-by-bucket)
     - [Custom Drivers](#custom-drivers)
+  - [Health Checks](#health-checks)
+  - [Testing](#testing)
+    - [Using FakeDisk](#using-fakedisk)
+    - [StorageTestUtils](#storagetestutils)
+    - [FakeDisk Assertion Methods](#fakedisk-assertion-methods)
+    - [Manual Mocking](#manual-mocking)
   - [API Reference](#api-reference)
     - [StorageService](#storageservice)
     - [FilesystemContract](#filesystemcontract)
       - [Core Operations](#core-operations)
+      - [Convenience Operations (optional per driver)](#convenience-operations-optional-per-driver)
       - [Directory Operations](#directory-operations-1)
       - [Visibility Operations](#visibility-operations)
       - [URL Operations](#url-operations)
@@ -81,8 +96,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
       - [`MultipartUploadOptions`](#multipartuploadoptions)
       - [`FileMetadata`](#filemetadata)
     - [Utility Functions](#utility-functions)
-  - [Testing](#testing)
-    - [Testing in your application](#testing-in-your-application)
+  - [Upgrading from 0.0.1](#upgrading-from-001)
   - [License](#license)
 
 ## Installation
@@ -357,6 +371,44 @@ export class MyService {
 }
 ```
 
+### Injecting a Specific Disk
+
+Use `@InjectDisk()` to inject a specific disk directly, without going through `StorageService`:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { InjectDisk, FilesystemContract } from '@fozooni/nestjs-storage';
+
+@Injectable()
+export class PhotoService {
+  constructor(
+    @InjectDisk('s3') private readonly s3: FilesystemContract,
+    @InjectDisk('local') private readonly local: FilesystemContract,
+  ) {}
+
+  async upload(data: Buffer) {
+    // Write directly to S3
+    await this.s3.put('photos/image.jpg', data);
+
+    // Also save a local backup
+    await this.local.put('backups/image.jpg', data);
+  }
+}
+```
+
+**With `forRoot()`** — Disk providers are auto-registered for all configured disk names.
+
+**With `forRootAsync()`** — Specify which disks to register via `injectDisks`:
+
+```typescript
+StorageModule.forRootAsync({
+  imports: [ConfigModule],
+  useFactory: (config: ConfigService) => ({ ... }),
+  inject: [ConfigService],
+  injectDisks: ['s3', 'local', 'gcs'],
+});
+```
+
 ### File Operations
 
 All methods below operate on the **default disk** unless you call `storage.disk('name')` first.
@@ -408,6 +460,60 @@ await storage.prepend('log.txt', 'New first line\n');
 
 // Append content to a file
 await storage.append('log.txt', 'New last line\n');
+```
+
+### Convenience Methods
+
+```typescript
+// Check if a file is missing (inverse of exists)
+const isMissing: boolean = await storage.missing('file.txt');
+
+// Read and parse a JSON file
+const data = await storage.json<{ name: string }>('config.json');
+
+// Compute a file checksum
+const md5 = await storage.checksum('file.txt'); // default: md5
+const sha256 = await storage.checksum('file.txt', 'sha256'); // 'md5' | 'sha1' | 'sha256'
+
+// Delete multiple files at once
+const result = await storage.deleteMany(['old1.txt', 'old2.txt', 'old3.txt']);
+console.log(result.succeeded); // ['old1.txt', 'old2.txt', 'old3.txt']
+console.log(result.failed);    // []
+```
+
+### Streaming Downloads
+
+Return a `StreamableFile` ready for NestJS controller responses:
+
+```typescript
+import { Controller, Get, Param, StreamableFile } from '@nestjs/common';
+import { StorageService } from '@fozooni/nestjs-storage';
+
+@Controller('files')
+export class FilesController {
+  constructor(private readonly storage: StorageService) {}
+
+  @Get(':path')
+  async download(@Param('path') path: string): Promise<StreamableFile> {
+    return this.storage.getStreamableFile(path);
+    // Sets Content-Type, Content-Length, Content-Disposition automatically
+  }
+
+  @Get(':path/preview')
+  async preview(@Param('path') path: string): Promise<StreamableFile> {
+    return this.storage.getStreamableFile(path, {
+      disposition: 'inline', // Display in browser instead of downloading
+    });
+  }
+
+  @Get(':path/download')
+  async downloadAs(@Param('path') path: string): Promise<StreamableFile> {
+    return this.storage.getStreamableFile(path, {
+      filename: 'custom-name.pdf', // Override download filename
+      disposition: 'attachment',
+    });
+  }
+}
 ```
 
 ### Directory Operations
@@ -581,19 +687,78 @@ StorageModule.forRoot({
 });
 ```
 
+## Health Checks
+
+Integrate with `@nestjs/terminus` for storage health monitoring:
+
+```bash
+npm install @nestjs/terminus
+```
+
+```typescript
+import { Controller, Get } from '@nestjs/common';
+import { HealthCheck, HealthCheckService } from '@nestjs/terminus';
+import { StorageHealthIndicator } from '@fozooni/nestjs-storage';
+
+@Controller('health')
+export class HealthController {
+  constructor(
+    private health: HealthCheckService,
+    private storageHealth: StorageHealthIndicator,
+  ) {}
+
+  @Get()
+  @HealthCheck()
+  check() {
+    return this.health.check([
+      // Check a single disk
+      () => this.storageHealth.check('storage', 's3'),
+    ]);
+  }
+
+  @Get('all-disks')
+  @HealthCheck()
+  checkAll() {
+    return this.health.check([
+      // Check multiple disks at once
+      () => this.storageHealth.checkDisks('storage', ['s3', 'local', 'gcs']),
+    ]);
+  }
+}
+```
+
+Add `StorageHealthIndicator` to your health module providers:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { TerminusModule } from '@nestjs/terminus';
+import { StorageHealthIndicator } from '@fozooni/nestjs-storage';
+
+@Module({
+  imports: [TerminusModule],
+  providers: [StorageHealthIndicator],
+  controllers: [HealthController],
+})
+export class HealthModule {}
+```
+
+Options: `{ healthCheckFile?: string, timeout?: number }` (defaults: `.storage-health-check`, 5000ms).
+
 ## API Reference
 
 ### StorageService
 
 The main service that implements `StorageManager`. Registered as a global provider.
 
-| Method                    | Returns              | Description                                           |
-| ------------------------- | -------------------- | ----------------------------------------------------- |
-| `disk(name?)`             | `FilesystemContract` | Get a disk instance by name (default disk if no name) |
-| `diskByBucket(bucket)`    | `FilesystemContract` | Find disk by bucket name                              |
-| `cloud()`                 | `FilesystemContract` | Shortcut for `disk('main')`                           |
-| `build(config)`           | `FilesystemContract` | Build a disk from config (not cached)                 |
-| `extend(driver, factory)` | `void`               | Register a custom driver                              |
+| Method                                 | Returns              | Description                                           |
+| -------------------------------------- | -------------------- | ----------------------------------------------------- |
+| `disk(name?)`                          | `FilesystemContract` | Get a disk instance by name (default disk if no name) |
+| `diskByBucket(bucket)`                 | `FilesystemContract` | Find disk by bucket name                              |
+| `cloud()`                              | `FilesystemContract` | Shortcut for `disk('main')`                           |
+| `build(config)`                        | `FilesystemContract` | Build a disk from config (not cached)                 |
+| `extend(driver, factory)`              | `void`               | Register a custom driver                              |
+| `setDisk(name, disk)`                  | `void`               | Replace a disk instance (useful for testing)          |
+| `getStreamableFile(path, options?)`    | `StreamableFile`     | Get a NestJS `StreamableFile` for controller responses |
 
 All `FilesystemContract` methods are proxied to the default disk.
 
@@ -617,6 +782,15 @@ The interface all drivers implement.
 | `lastModified` | `(path: string) => Promise<number>`                                                                      | Timestamp (ms)            |
 | `prepend`      | `(path: string, data: string) => Promise<boolean>`                                                       | Success                   |
 | `append`       | `(path: string, data: string) => Promise<boolean>`                                                       | Success                   |
+
+#### Convenience Operations (optional per driver)
+
+| Method       | Signature                                                           | Returns                    |
+| ------------ | ------------------------------------------------------------------- | -------------------------- |
+| `missing`    | `(path: string) => Promise<boolean>`                                | Whether the file is absent |
+| `json`       | `<T>(path: string) => Promise<T>`                                   | Parsed JSON content        |
+| `checksum`   | `(path: string, algorithm?: 'md5' \| 'sha1' \| 'sha256') => Promise<string>` | Hex digest string |
+| `deleteMany` | `(paths: string[]) => Promise<DeleteManyResult>`                    | `{ succeeded, failed }`   |
 
 #### Directory Operations
 
@@ -791,23 +965,78 @@ Exported from `@fozooni/nestjs-storage`:
 
 ## Testing
 
-```bash
-# Run tests
-pnpm test
+### Using FakeDisk
 
-# Run tests with coverage
-pnpm test -- --coverage
+`FakeDisk` is an in-memory implementation of `FilesystemContract` — perfect for testing without touching real storage:
 
-# Build
-pnpm build
+```typescript
+import { Test } from '@nestjs/testing';
+import { StorageService, StorageTestUtils, FakeDisk } from '@fozooni/nestjs-storage';
 
-# Lint
-pnpm lint
+describe('UploadService', () => {
+  let uploadService: UploadService;
+  let fakeDisk: FakeDisk;
+  let storageService: StorageService;
+
+  beforeEach(async () => {
+    const module = await Test.createTestingModule({
+      imports: [StorageModule.forRoot({ default: 's3', disks: { s3: { driver: 's3', bucket: 'test', region: 'us-east-1', key: 'k', secret: 's' } } })],
+      providers: [UploadService],
+    }).compile();
+
+    storageService = module.get(StorageService);
+    uploadService = module.get(UploadService);
+
+    // Replace the 's3' disk with an in-memory FakeDisk
+    fakeDisk = StorageTestUtils.fake(storageService, 's3');
+  });
+
+  it('should upload a file', async () => {
+    await uploadService.upload('photo.jpg', Buffer.from('image data'));
+
+    // Use assertion methods
+    fakeDisk.assertExists('uploads/photo.jpg');
+    fakeDisk.assertContentEquals('uploads/photo.jpg', 'image data');
+    fakeDisk.assertCount(1, 'uploads');
+  });
+});
 ```
 
-### Testing in your application
+### StorageTestUtils
 
-Mock `StorageService` in your tests:
+```typescript
+import { StorageTestUtils } from '@fozooni/nestjs-storage';
+
+// Replace a disk with a FakeDisk
+const fakeDisk = StorageTestUtils.fake(storageService, 's3');
+
+// Create a mock Multer-like file for upload testing
+const file = StorageTestUtils.fakeFile({
+  name: 'photo.jpg',
+  content: 'image data',
+  mimetype: 'image/jpeg',
+});
+
+// Create a file with a specific size (zero-filled)
+const largeFile = StorageTestUtils.fakeFileWithSize(5 * 1024 * 1024, 'video.mp4');
+```
+
+### FakeDisk Assertion Methods
+
+| Method                                   | Description                               |
+| ---------------------------------------- | ----------------------------------------- |
+| `assertExists(path)`                     | Assert file exists (throws if missing)    |
+| `assertMissing(path)`                    | Assert file does not exist                |
+| `assertCount(n, directory?)`             | Assert exact number of files              |
+| `assertDirectoryEmpty(directory)`        | Assert directory has no files             |
+| `assertContentEquals(path, expected)`    | Assert file content matches               |
+| `getStoredFiles()`                       | Get all stored file paths                 |
+| `getStoredFile(path)`                    | Get file data (content, metadata, etc.)   |
+| `reset()`                                | Clear all stored files and directories    |
+
+### Manual Mocking
+
+You can also mock `StorageService` manually if you prefer:
 
 ```typescript
 import { Test } from '@nestjs/testing';
@@ -820,13 +1049,30 @@ const mockStorage = {
   delete: jest.fn().mockResolvedValue(true),
   url: jest.fn().mockReturnValue('https://example.com/file.txt'),
   disk: jest.fn().mockReturnThis(),
-  // ... add other methods as needed
 };
 
 const module = await Test.createTestingModule({
   providers: [YourService, { provide: StorageService, useValue: mockStorage }],
 }).compile();
 ```
+
+## Upgrading from 0.0.1
+
+v0.0.2 is a **non-breaking** upgrade. All existing APIs remain unchanged.
+
+```bash
+npm install @fozooni/nestjs-storage@0.0.2
+```
+
+**What's new:**
+
+- `@InjectDisk('name')` — Inject specific disks directly (auto-registered with `forRoot`, use `injectDisks` with `forRootAsync`)
+- `FakeDisk` + `StorageTestUtils` — In-memory disk for testing
+- `StorageHealthIndicator` — Health checks via `@nestjs/terminus` (optional peer dep)
+- `missing()`, `json()`, `checksum()`, `deleteMany()` — Convenience methods on all disks
+- `getStreamableFile()` — Stream files directly from NestJS controllers
+
+**For custom driver authors:** New convenience methods (`missing`, `json`, `checksum`, `deleteMany`) are **optional** on `FilesystemContract`. Your existing custom drivers will continue to work without changes. To support the new methods, implement them on your driver class.
 
 ## License
 

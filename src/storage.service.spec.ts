@@ -1,3 +1,6 @@
+import { StreamableFile } from '@nestjs/common';
+import { Readable } from 'stream';
+
 import { StorageService } from './storage.service';
 import type { DiskConfig, FilesystemContract } from './interfaces/storage.interface';
 
@@ -37,6 +40,10 @@ function createMockDisk(overrides: Partial<FilesystemContract> = {}): Filesystem
     abortMultipartUpload: jest.fn().mockResolvedValue(true),
     putFileMultipart: jest.fn().mockResolvedValue('uploads/file.txt'),
     getBucket: jest.fn().mockReturnValue('test-bucket'),
+    missing: jest.fn().mockResolvedValue(false),
+    json: jest.fn().mockResolvedValue({ key: 'value' }),
+    checksum: jest.fn().mockResolvedValue('d41d8cd98f00b204e9800998ecf8427e'),
+    deleteMany: jest.fn().mockResolvedValue({ succeeded: ['file.txt'], failed: [] }),
     ...overrides,
   };
 }
@@ -324,6 +331,42 @@ describe('StorageService', () => {
     });
   });
 
+  describe('convenience method proxies', () => {
+    it('should proxy missing', async () => {
+      await service.missing('file.txt');
+      expect(mockLocalDisk.missing).toHaveBeenCalledWith('file.txt');
+    });
+
+    it('should proxy json', async () => {
+      await service.json('data.json');
+      expect(mockLocalDisk.json).toHaveBeenCalledWith('data.json');
+    });
+
+    it('should proxy checksum', async () => {
+      await service.checksum('file.txt', 'sha256');
+      expect(mockLocalDisk.checksum).toHaveBeenCalledWith('file.txt', 'sha256');
+    });
+
+    it('should proxy deleteMany', async () => {
+      await service.deleteMany(['a.txt', 'b.txt']);
+      expect(mockLocalDisk.deleteMany).toHaveBeenCalledWith(['a.txt', 'b.txt']);
+    });
+
+    it('should throw if disk does not support missing', async () => {
+      const noMissingDisk = createMockDisk({ missing: undefined });
+      (service as any).disks.set('local', noMissingDisk);
+      await expect(service.missing('file.txt')).rejects.toThrow('Disk does not support missing()');
+    });
+  });
+
+  describe('setDisk', () => {
+    it('should replace a cached disk', () => {
+      const newDisk = createMockDisk();
+      service.setDisk('local', newDisk);
+      expect(service.disk('local')).toBe(newDisk);
+    });
+  });
+
   describe('multipart proxy methods', () => {
     it('should proxy initMultipartUpload', async () => {
       await service.initMultipartUpload('file.txt');
@@ -393,6 +436,59 @@ describe('StorageService', () => {
       await expect(svc.putFileMultipart('uploads', Buffer.from(''))).rejects.toThrow(
         'Disk does not support multipart upload',
       );
+    });
+  });
+
+  describe('getStreamableFile', () => {
+    it('should return a StreamableFile with correct options', async () => {
+      const mockStream = Readable.from(['file content']);
+      (mockLocalDisk.get as jest.Mock).mockResolvedValue(mockStream);
+      (mockLocalDisk.mimeType as jest.Mock).mockResolvedValue('application/pdf');
+      (mockLocalDisk.size as jest.Mock).mockResolvedValue(12345);
+
+      const result = await service.getStreamableFile('documents/report.pdf');
+
+      expect(result).toBeInstanceOf(StreamableFile);
+      expect(result.getHeaders().type).toBe('application/pdf');
+      expect(result.getHeaders().length).toBe(12345);
+      expect(result.getHeaders().disposition).toBe('attachment; filename="report.pdf"');
+    });
+
+    it('should use inline disposition when specified', async () => {
+      const mockStream = Readable.from(['data']);
+      (mockLocalDisk.get as jest.Mock).mockResolvedValue(mockStream);
+      (mockLocalDisk.mimeType as jest.Mock).mockResolvedValue('image/jpeg');
+      (mockLocalDisk.size as jest.Mock).mockResolvedValue(500);
+
+      const result = await service.getStreamableFile('photos/image.jpg', {
+        disposition: 'inline',
+      });
+
+      expect(result.getHeaders().disposition).toBe('inline; filename="image.jpg"');
+    });
+
+    it('should use custom filename when provided', async () => {
+      const mockStream = Readable.from(['data']);
+      (mockLocalDisk.get as jest.Mock).mockResolvedValue(mockStream);
+      (mockLocalDisk.mimeType as jest.Mock).mockResolvedValue('text/plain');
+      (mockLocalDisk.size as jest.Mock).mockResolvedValue(100);
+
+      const result = await service.getStreamableFile('uploads/abc123.txt', {
+        filename: 'my-document.txt',
+      });
+
+      expect(result.getHeaders().disposition).toBe('attachment; filename="my-document.txt"');
+    });
+
+    it('should call get with stream responseType', async () => {
+      const mockStream = Readable.from(['data']);
+      (mockLocalDisk.get as jest.Mock).mockResolvedValue(mockStream);
+      (mockLocalDisk.mimeType as jest.Mock).mockResolvedValue('text/plain');
+      (mockLocalDisk.size as jest.Mock).mockResolvedValue(4);
+
+      await service.getStreamableFile('file.txt');
+
+      expect(mockLocalDisk.get).toHaveBeenCalledWith('file.txt', { responseType: 'stream' });
     });
   });
 });

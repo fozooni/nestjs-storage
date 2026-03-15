@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 
-import { STORAGE_MODULE_OPTIONS } from './constants';
+import { getStorageDiskToken, STORAGE_MODULE_OPTIONS } from './constants';
 import { StorageModule } from './storage.module';
 import { StorageService } from './storage.service';
 import type { StorageModuleOptions } from './interfaces/storage-module-options.interface';
@@ -176,6 +176,43 @@ describe('StorageModule', () => {
       expect(() => StorageModule.forRootAsync({} as any)).toThrow(
         'StorageModule.forRootAsync() requires one of: useFactory, useClass, or useExisting',
       );
+    });
+  });
+
+  describe('InjectDisk', () => {
+    it('should register disk providers for all configured disks in forRoot', async () => {
+      const module = await Test.createTestingModule({
+        imports: [StorageModule.forRoot(testOptions)],
+      }).compile();
+
+      const localDisk = module.get(getStorageDiskToken('local'));
+      expect(localDisk).toBeDefined();
+    });
+
+    it('should register disk providers for injectDisks in forRootAsync', async () => {
+      const module = await Test.createTestingModule({
+        imports: [
+          StorageModule.forRootAsync({
+            useFactory: () => testOptions,
+            injectDisks: ['local'],
+          }),
+        ],
+      }).compile();
+
+      const localDisk = module.get(getStorageDiskToken('local'));
+      expect(localDisk).toBeDefined();
+    });
+
+    it('should not register disk providers when injectDisks is not provided in forRootAsync', async () => {
+      const module = await Test.createTestingModule({
+        imports: [
+          StorageModule.forRootAsync({
+            useFactory: () => testOptions,
+          }),
+        ],
+      }).compile();
+
+      expect(() => module.get(getStorageDiskToken('local'))).toThrow();
     });
   });
 });

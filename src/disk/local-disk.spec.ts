@@ -354,6 +354,66 @@ describe('LocalDisk', () => {
     });
   });
 
+  describe('missing', () => {
+    it('should return true when file does not exist', async () => {
+      expect(await disk.missing('nonexistent.txt')).toBe(true);
+    });
+
+    it('should return false when file exists', async () => {
+      await disk.put('exists.txt', 'data');
+      expect(await disk.missing('exists.txt')).toBe(false);
+    });
+  });
+
+  describe('json', () => {
+    it('should read and parse JSON file', async () => {
+      const data = { name: 'test', value: 42 };
+      await disk.put('data.json', JSON.stringify(data));
+      const result = await disk.json<{ name: string; value: number }>('data.json');
+      expect(result).toEqual(data);
+    });
+
+    it('should throw on invalid JSON', async () => {
+      await disk.put('bad.json', 'not json');
+      await expect(disk.json('bad.json')).rejects.toThrow();
+    });
+  });
+
+  describe('checksum', () => {
+    it('should compute md5 checksum by default', async () => {
+      await disk.put('hash.txt', 'hello');
+      const result = await disk.checksum('hash.txt');
+      // md5 of 'hello' = 5d41402abc4b2a76b9719d911017c592
+      expect(result).toBe('5d41402abc4b2a76b9719d911017c592');
+    });
+
+    it('should compute sha256 checksum', async () => {
+      await disk.put('hash.txt', 'hello');
+      const result = await disk.checksum('hash.txt', 'sha256');
+      // sha256 of 'hello' = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+      expect(result).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
+    });
+  });
+
+  describe('deleteMany', () => {
+    it('should delete multiple files', async () => {
+      await disk.put('a.txt', 'a');
+      await disk.put('b.txt', 'b');
+      await disk.put('c.txt', 'c');
+
+      const result = await disk.deleteMany(['a.txt', 'b.txt', 'c.txt']);
+      expect(result.succeeded).toEqual(['a.txt', 'b.txt', 'c.txt']);
+      expect(result.failed).toEqual([]);
+      expect(await disk.exists('a.txt')).toBe(false);
+    });
+
+    it('should report non-existent files as succeeded (delete is idempotent)', async () => {
+      const result = await disk.deleteMany(['nonexistent.txt']);
+      expect(result.succeeded).toEqual(['nonexistent.txt']);
+      expect(result.failed).toEqual([]);
+    });
+  });
+
   describe('putFile', () => {
     it('should put a multer-like file', async () => {
       const file = { buffer: Buffer.from('multer data'), originalname: 'upload.txt' };

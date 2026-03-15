@@ -1,5 +1,5 @@
 import { DynamicModule, Global, Module, Provider } from '@nestjs/common';
-import { STORAGE_MODULE_OPTIONS } from './constants';
+import { getStorageDiskToken, STORAGE_MODULE_OPTIONS } from './constants';
 import {
   StorageModuleAsyncOptions,
   StorageModuleOptions,
@@ -11,6 +11,9 @@ import { StorageService } from './storage.service';
 @Module({})
 export class StorageModule {
   static forRoot(options: StorageModuleOptions): DynamicModule {
+    const diskNames = Object.keys(options.disks || {});
+    const diskProviders = this.createDiskProviders(diskNames);
+
     return {
       module: StorageModule,
       providers: [
@@ -19,19 +22,21 @@ export class StorageModule {
           useValue: options,
         },
         StorageService,
+        ...diskProviders,
       ],
-      exports: [StorageService],
+      exports: [StorageService, ...diskProviders.map((p) => p.provide)],
     };
   }
 
   static forRootAsync(options: StorageModuleAsyncOptions): DynamicModule {
     const asyncProviders = this.createAsyncProviders(options);
+    const diskProviders = this.createDiskProviders(options.injectDisks || []);
 
     return {
       module: StorageModule,
       imports: options.imports || [],
-      providers: [...asyncProviders, StorageService],
-      exports: [StorageService],
+      providers: [...asyncProviders, StorageService, ...diskProviders],
+      exports: [StorageService, ...diskProviders.map((p) => p.provide)],
     };
   }
 
@@ -75,5 +80,15 @@ export class StorageModule {
     throw new Error(
       'StorageModule.forRootAsync() requires one of: useFactory, useClass, or useExisting',
     );
+  }
+
+  private static createDiskProviders(
+    diskNames: string[],
+  ): { provide: string; useFactory: (storage: StorageService) => any; inject: any[] }[] {
+    return diskNames.map((diskName) => ({
+      provide: getStorageDiskToken(diskName),
+      useFactory: (storageService: StorageService) => storageService.disk(diskName),
+      inject: [StorageService],
+    }));
   }
 }

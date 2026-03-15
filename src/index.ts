@@ -5,7 +5,7 @@ export { StorageModule } from './storage.module';
 export { StorageService } from './storage.service';
 
 // Constants
-export { STORAGE_MODULE_OPTIONS } from './constants';
+export { STORAGE_MODULE_OPTIONS, getStorageDiskToken } from './constants';
 
 // Interfaces & Types
 export * from './interfaces';
@@ -21,3 +21,9 @@ export * from './wrapper';
 
 // Utilities
 export * from './utils';
+
+// Testing utilities
+export * from './testing';
+
+// Health
+export * from './health';

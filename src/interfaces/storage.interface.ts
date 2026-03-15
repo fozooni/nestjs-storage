@@ -117,6 +117,18 @@ export interface MultipartUploadStatus {
   totalBytes: number;
 }
 
+export type ChecksumAlgorithm = 'md5' | 'sha1' | 'sha256';
+
+export interface DeleteManyResult {
+  succeeded: string[];
+  failed: string[];
+}
+
+export interface StreamableFileOptions {
+  disposition?: 'inline' | 'attachment';
+  filename?: string;
+}
+
 export interface FilesystemContract {
   // Core operations
   exists(path: string): Promise<boolean>;
@@ -186,6 +198,12 @@ export interface FilesystemContract {
     options?: MultipartUploadOptions,
   ): Promise<string | false>;
 
+  // Convenience operations
+  missing?(path: string): Promise<boolean>;
+  json?<T = unknown>(path: string): Promise<T>;
+  checksum?(path: string, algorithm?: ChecksumAlgorithm): Promise<string>;
+  deleteMany?(paths: string[]): Promise<DeleteManyResult>;
+
   // Storage configuration
   getBucket?(): string | undefined;
 }
@@ -196,6 +214,7 @@ export interface StorageManager {
   cloud(): FilesystemContract;
   build(config: DiskConfig): FilesystemContract;
   extend(driver: string, callback: (config: DiskConfig) => FilesystemContract): void;
+  setDisk(name: string, disk: FilesystemContract): void;
 
   // Proxy methods to default disk
   exists(path: string): Promise<boolean>;
@@ -251,6 +270,12 @@ export interface StorageManager {
     file: any,
     options?: MultipartUploadOptions,
   ): Promise<string | false>;
+
+  // Convenience methods
+  missing(path: string): Promise<boolean>;
+  json<T = unknown>(path: string): Promise<T>;
+  checksum(path: string, algorithm?: ChecksumAlgorithm): Promise<string>;
+  deleteMany(paths: string[]): Promise<DeleteManyResult>;
 }
 
 export interface StorageConfig {

@@ -8,6 +8,8 @@ export interface StorageModuleOptionsFactory {
 }
 
 export interface StorageModuleAsyncOptions extends Pick<ModuleMetadata, 'imports'> {
+  /** Disk names to register as injectable providers for @InjectDisk() */
+  injectDisks?: string[];
   useExisting?: Type<StorageModuleOptionsFactory>;
   useClass?: Type<StorageModuleOptionsFactory>;
   useFactory?: (...args: any[]) => Promise<StorageModuleOptions> | StorageModuleOptions;

@@ -3,7 +3,9 @@ import { createReadStream } from 'fs';
 import { Readable } from 'stream';
 
 import {
+  ChecksumAlgorithm,
   CopyOptions,
+  DeleteManyResult,
   DiskConfig,
   FileMetadata,
   FilesystemContract,
@@ -643,5 +645,41 @@ export class GcsDisk implements FilesystemContract {
 
   getBucket(): string {
     return this.client.getBucket();
+  }
+
+  async missing(path: string): Promise<boolean> {
+    return !(await this.exists(path));
+  }
+
+  async json<T = unknown>(path: string): Promise<T> {
+    const content = await this.get(path, { responseType: 'string' });
+    return JSON.parse(content as string);
+  }
+
+  async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {
+    const content = await this.get(path);
+    const hash = createHash(algorithm);
+    hash.update(content as Buffer);
+    return hash.digest('hex');
+  }
+
+  async deleteMany(paths: string[]): Promise<DeleteManyResult> {
+    const succeeded: string[] = [];
+    const failed: string[] = [];
+
+    for (const filePath of paths) {
+      try {
+        const result = await this.delete(filePath);
+        if (result) {
+          succeeded.push(filePath);
+        } else {
+          failed.push(filePath);
+        }
+      } catch {
+        failed.push(filePath);
+      }
+    }
+
+    return { succeeded, failed };
   }
 }
