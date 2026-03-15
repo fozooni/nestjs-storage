@@ -6,11 +6,15 @@
 
 A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, and Google Cloud Storage.
 
+## Support
+
+If you find this package useful, please consider giving it a star on [GitHub](https://github.com/fozooni/nestjs-storage). It helps others discover it and motivates further development!
+
 ## Compatibility
 
-| @fozooni/nestjs-storage | NestJS    | Node.js        |
-|-------------------------|-----------|----------------|
-| `0.x`                   | 10 \| 11  | 18, 20, 22     |
+| @fozooni/nestjs-storage | NestJS   | Node.js    |
+| ----------------------- | -------- | ---------- |
+| `0.x`                   | 10 \| 11 | 18, 20, 22 |
 
 > Tested on every push via [GitHub Actions CI](https://github.com/fozooni/nestjs-storage/actions/workflows/ci.yml) against Node 18, 20, and 22.
 
@@ -28,35 +32,57 @@ A powerful, driver-based storage module for NestJS with a unified API across Loc
 
 ## Table of Contents
 
-- [Compatibility](#compatibility)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Module Registration](#module-registration)
-  - [forRoot](#forroot)
-  - [forRootAsync](#forrootasync)
-- [Driver Configuration](#driver-configuration)
-  - [Local](#local-driver)
-  - [S3](#s3-driver)
-  - [R2 (Cloudflare)](#r2-driver-cloudflare)
-  - [GCS (Google Cloud)](#gcs-driver-google-cloud)
-- [Usage](#usage)
-  - [Injecting the Service](#injecting-the-service)
-  - [File Operations](#file-operations)
-  - [Directory Operations](#directory-operations)
-  - [Visibility](#visibility)
-  - [URLs](#urls)
-  - [Metadata](#metadata)
-  - [Multipart Uploads](#multipart-uploads)
-  - [Multiple Disks](#multiple-disks)
-  - [Disk by Bucket](#disk-by-bucket)
-  - [Custom Drivers](#custom-drivers)
-- [API Reference](#api-reference)
-  - [StorageService](#storageservice)
-  - [FilesystemContract](#filesystemcontract)
-  - [Configuration Types](#configuration-types)
-  - [Utility Functions](#utility-functions)
-- [Testing](#testing)
-- [License](#license)
+- [@fozooni/nestjs-storage](#fozooninestjs-storage)
+  - [Support](#support)
+  - [Compatibility](#compatibility)
+  - [Features](#features)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+    - [Driver-specific dependencies](#driver-specific-dependencies)
+  - [Quick Start](#quick-start)
+  - [Module Registration](#module-registration)
+    - [forRoot](#forroot)
+    - [forRootAsync](#forrootasync)
+      - [useFactory](#usefactory)
+      - [useClass](#useclass)
+      - [useExisting](#useexisting)
+  - [Driver Configuration](#driver-configuration)
+    - [Local Driver](#local-driver)
+    - [S3 Driver](#s3-driver)
+    - [R2 Driver (Cloudflare)](#r2-driver-cloudflare)
+    - [GCS Driver (Google Cloud)](#gcs-driver-google-cloud)
+  - [Usage](#usage)
+    - [Injecting the Service](#injecting-the-service)
+    - [File Operations](#file-operations)
+    - [Directory Operations](#directory-operations)
+    - [Visibility](#visibility)
+    - [URLs](#urls)
+    - [Metadata](#metadata)
+    - [Multipart Uploads](#multipart-uploads)
+    - [Multiple Disks](#multiple-disks)
+    - [Disk by Bucket](#disk-by-bucket)
+    - [Custom Drivers](#custom-drivers)
+  - [API Reference](#api-reference)
+    - [StorageService](#storageservice)
+    - [FilesystemContract](#filesystemcontract)
+      - [Core Operations](#core-operations)
+      - [Directory Operations](#directory-operations-1)
+      - [Visibility Operations](#visibility-operations)
+      - [URL Operations](#url-operations)
+      - [Metadata Operations](#metadata-operations)
+      - [Multipart Upload Operations (optional per driver)](#multipart-upload-operations-optional-per-driver)
+    - [Configuration Types](#configuration-types)
+      - [`StorageModuleOptions`](#storagemoduleoptions)
+      - [`DiskConfig`](#diskconfig)
+      - [`PutOptions`](#putoptions)
+      - [`GetOptions`](#getoptions)
+      - [`TemporaryUrlOptions`](#temporaryurloptions)
+      - [`MultipartUploadOptions`](#multipartuploadoptions)
+      - [`FileMetadata`](#filemetadata)
+    - [Utility Functions](#utility-functions)
+  - [Testing](#testing)
+    - [Testing in your application](#testing-in-your-application)
+  - [License](#license)
 
 ## Installation
 
@@ -181,10 +207,7 @@ StorageModule.forRootAsync({
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import {
-  StorageModuleOptionsFactory,
-  StorageModuleOptions,
-} from '@fozooni/nestjs-storage';
+import { StorageModuleOptionsFactory, StorageModuleOptions } from '@fozooni/nestjs-storage';
 
 @Injectable()
 class StorageOptionsFactory implements StorageModuleOptionsFactory {
@@ -229,6 +252,7 @@ Stores files on the local filesystem.
 ```
 
 **Notes:**
+
 - Path traversal protection is built-in (prevents `../` escapes)
 - File permissions: `public` = `0o644`, `private` = `0o600`
 - Directory permissions: `public` = `0o755`, `private` = `0o700`
@@ -254,6 +278,7 @@ Amazon S3 and S3-compatible storage.
 ```
 
 **Notes:**
+
 - Visibility uses S3 ACLs (`public-read` / `private`)
 - Multipart uploads use the native S3 multipart API
 - Default chunk size: 5 MB (configurable)
@@ -277,6 +302,7 @@ Cloudflare R2 object storage. Extends S3Disk internally.
 ```
 
 **Notes:**
+
 - Endpoint is auto-configured to `https://{accountId}.r2.cloudflarestorage.com`
 - Visibility is always `private` — `setVisibility()` throws an error (R2 does not support per-object ACLs)
 - `url()` requires `config.url` to be set (R2 has no default public URL)
@@ -300,6 +326,7 @@ Google Cloud Storage.
 ```
 
 **Notes:**
+
 - Uses `@google-cloud/storage` SDK
 - Authentication via `keyFilename`, `credentials` object, or Application Default Credentials (ADC)
 - Multipart uploads use the GCS compose API (batches of 32 objects max, automatically handled)
@@ -426,12 +453,12 @@ await storage.put('file.txt', data, { visibility: 'public' });
 
 **Driver-specific behavior:**
 
-| Driver | Public | Private | Notes |
-|--------|--------|---------|-------|
-| Local  | `0o644` | `0o600` | Uses file permissions |
-| S3     | `public-read` ACL | `private` ACL | Uses S3 ACLs |
-| R2     | N/A | Always `private` | `setVisibility()` throws |
-| GCS    | `makePublic()` | `makePrivate()` | Uses GCS IAM |
+| Driver | Public            | Private          | Notes                    |
+| ------ | ----------------- | ---------------- | ------------------------ |
+| Local  | `0o644`           | `0o600`          | Uses file permissions    |
+| S3     | `public-read` ACL | `private` ACL    | Uses S3 ACLs             |
+| R2     | N/A               | Always `private` | `setVisibility()` throws |
+| GCS    | `makePublic()`    | `makePrivate()`  | Uses GCS IAM             |
 
 ### URLs
 
@@ -446,7 +473,7 @@ const url: string = storage.url('photos/avatar.jpg');
 // Get a temporary signed URL (cloud drivers)
 const signedUrl: string = await storage.temporaryUrl(
   'photos/avatar.jpg',
-  new Date(Date.now() + 3600 * 1000),  // Expires in 1 hour
+  new Date(Date.now() + 3600 * 1000), // Expires in 1 hour
   { method: 'GET' },
 );
 ```
@@ -470,9 +497,9 @@ For large files, use multipart uploads which split the file into chunks:
 ```typescript
 // Simple: Upload a large file with automatic chunking
 const path = await storage.putFileMultipart('uploads', largeFile, {
-  chunkSize: 10 * 1024 * 1024,  // 10 MB chunks
+  chunkSize: 10 * 1024 * 1024, // 10 MB chunks
   onProgress: (uploaded, total) => {
-    console.log(`${Math.round(uploaded / total * 100)}%`);
+    console.log(`${Math.round((uploaded / total) * 100)}%`);
   },
 });
 
@@ -559,13 +586,13 @@ StorageModule.forRoot({
 
 The main service that implements `StorageManager`. Registered as a global provider.
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `disk(name?)` | `FilesystemContract` | Get a disk instance by name (default disk if no name) |
-| `diskByBucket(bucket)` | `FilesystemContract` | Find disk by bucket name |
-| `cloud()` | `FilesystemContract` | Shortcut for `disk('main')` |
-| `build(config)` | `FilesystemContract` | Build a disk from config (not cached) |
-| `extend(driver, factory)` | `void` | Register a custom driver |
+| Method                    | Returns              | Description                                           |
+| ------------------------- | -------------------- | ----------------------------------------------------- |
+| `disk(name?)`             | `FilesystemContract` | Get a disk instance by name (default disk if no name) |
+| `diskByBucket(bucket)`    | `FilesystemContract` | Find disk by bucket name                              |
+| `cloud()`                 | `FilesystemContract` | Shortcut for `disk('main')`                           |
+| `build(config)`           | `FilesystemContract` | Build a disk from config (not cached)                 |
+| `extend(driver, factory)` | `void`               | Register a custom driver                              |
 
 All `FilesystemContract` methods are proxied to the default disk.
 
@@ -575,63 +602,63 @@ The interface all drivers implement.
 
 #### Core Operations
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `exists` | `(path: string) => Promise<boolean>` | Whether the file exists |
-| `get` | `(path: string, options?: GetOptions) => Promise<Buffer \| ReadableStream \| string>` | File contents |
-| `put` | `(path: string, contents: string \| Buffer \| ReadableStream, options?: PutOptions) => Promise<boolean>` | Success |
-| `putFile` | `(path: string, file: any, options?: PutOptions) => Promise<string \| false>` | Generated path or `false` |
-| `putFileAs` | `(path: string, file: any, name: string, options?: PutOptions) => Promise<string \| false>` | Full path or `false` |
-| `delete` | `(path: string) => Promise<boolean>` | Success |
-| `copy` | `(from: string, to: string, options?: CopyOptions) => Promise<boolean>` | Success |
-| `move` | `(from: string, to: string, options?: MoveOptions) => Promise<boolean>` | Success |
-| `size` | `(path: string) => Promise<number>` | Size in bytes |
-| `lastModified` | `(path: string) => Promise<number>` | Timestamp (ms) |
-| `prepend` | `(path: string, data: string) => Promise<boolean>` | Success |
-| `append` | `(path: string, data: string) => Promise<boolean>` | Success |
+| Method         | Signature                                                                                                | Returns                   |
+| -------------- | -------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `exists`       | `(path: string) => Promise<boolean>`                                                                     | Whether the file exists   |
+| `get`          | `(path: string, options?: GetOptions) => Promise<Buffer \| ReadableStream \| string>`                    | File contents             |
+| `put`          | `(path: string, contents: string \| Buffer \| ReadableStream, options?: PutOptions) => Promise<boolean>` | Success                   |
+| `putFile`      | `(path: string, file: any, options?: PutOptions) => Promise<string \| false>`                            | Generated path or `false` |
+| `putFileAs`    | `(path: string, file: any, name: string, options?: PutOptions) => Promise<string \| false>`              | Full path or `false`      |
+| `delete`       | `(path: string) => Promise<boolean>`                                                                     | Success                   |
+| `copy`         | `(from: string, to: string, options?: CopyOptions) => Promise<boolean>`                                  | Success                   |
+| `move`         | `(from: string, to: string, options?: MoveOptions) => Promise<boolean>`                                  | Success                   |
+| `size`         | `(path: string) => Promise<number>`                                                                      | Size in bytes             |
+| `lastModified` | `(path: string) => Promise<number>`                                                                      | Timestamp (ms)            |
+| `prepend`      | `(path: string, data: string) => Promise<boolean>`                                                       | Success                   |
+| `append`       | `(path: string, data: string) => Promise<boolean>`                                                       | Success                   |
 
 #### Directory Operations
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `files` | `(directory?: string, recursive?: boolean) => Promise<string[]>` | File paths |
-| `allFiles` | `(directory?: string) => Promise<string[]>` | All file paths (recursive) |
-| `directories` | `(directory?: string, recursive?: boolean) => Promise<string[]>` | Directory paths |
-| `allDirectories` | `(directory?: string) => Promise<string[]>` | All directory paths (recursive) |
-| `makeDirectory` | `(path: string) => Promise<boolean>` | Success |
-| `deleteDirectory` | `(directory: string) => Promise<boolean>` | Success |
-| `directorySize` | `(directory?: string) => Promise<number>` | Total bytes |
+| Method            | Signature                                                        | Returns                         |
+| ----------------- | ---------------------------------------------------------------- | ------------------------------- |
+| `files`           | `(directory?: string, recursive?: boolean) => Promise<string[]>` | File paths                      |
+| `allFiles`        | `(directory?: string) => Promise<string[]>`                      | All file paths (recursive)      |
+| `directories`     | `(directory?: string, recursive?: boolean) => Promise<string[]>` | Directory paths                 |
+| `allDirectories`  | `(directory?: string) => Promise<string[]>`                      | All directory paths (recursive) |
+| `makeDirectory`   | `(path: string) => Promise<boolean>`                             | Success                         |
+| `deleteDirectory` | `(directory: string) => Promise<boolean>`                        | Success                         |
+| `directorySize`   | `(directory?: string) => Promise<number>`                        | Total bytes                     |
 
 #### Visibility Operations
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `getVisibility` | `(path: string) => Promise<'private' \| 'public'>` | Current visibility |
-| `setVisibility` | `(path: string, visibility: 'private' \| 'public') => Promise<boolean>` | Success |
+| Method          | Signature                                                               | Returns            |
+| --------------- | ----------------------------------------------------------------------- | ------------------ |
+| `getVisibility` | `(path: string) => Promise<'private' \| 'public'>`                      | Current visibility |
+| `setVisibility` | `(path: string, visibility: 'private' \| 'public') => Promise<boolean>` | Success            |
 
 #### URL Operations
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `url` | `(path: string) => string` | Public URL |
+| Method         | Signature                                                                                      | Returns    |
+| -------------- | ---------------------------------------------------------------------------------------------- | ---------- |
+| `url`          | `(path: string) => string`                                                                     | Public URL |
 | `temporaryUrl` | `(path: string, expiration: Date \| number, options?: TemporaryUrlOptions) => Promise<string>` | Signed URL |
 
 #### Metadata Operations
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
+| Method        | Signature                                 | Returns              |
+| ------------- | ----------------------------------------- | -------------------- |
 | `getMetadata` | `(path: string) => Promise<FileMetadata>` | File metadata object |
-| `mimeType` | `(path: string) => Promise<string>` | MIME type string |
+| `mimeType`    | `(path: string) => Promise<string>`       | MIME type string     |
 
 #### Multipart Upload Operations (optional per driver)
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `initMultipartUpload` | `(path: string, options?: MultipartUploadOptions) => Promise<MultipartUploadInit>` | Upload ID and key |
-| `uploadPart` | `(uploadId: string, partNumber: number, data: Buffer, path: string) => Promise<MultipartUploadPart>` | Part info |
-| `completeMultipartUpload` | `(uploadId: string, path: string, parts: MultipartUploadPart[]) => Promise<boolean>` | Success |
-| `abortMultipartUpload` | `(uploadId: string, path: string) => Promise<boolean>` | Success |
-| `putFileMultipart` | `(path: string, file: any, options?: MultipartUploadOptions) => Promise<string \| false>` | Path or `false` |
+| Method                    | Signature                                                                                            | Returns           |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------- |
+| `initMultipartUpload`     | `(path: string, options?: MultipartUploadOptions) => Promise<MultipartUploadInit>`                   | Upload ID and key |
+| `uploadPart`              | `(uploadId: string, partNumber: number, data: Buffer, path: string) => Promise<MultipartUploadPart>` | Part info         |
+| `completeMultipartUpload` | `(uploadId: string, path: string, parts: MultipartUploadPart[]) => Promise<boolean>`                 | Success           |
+| `abortMultipartUpload`    | `(uploadId: string, path: string) => Promise<boolean>`                                               | Success           |
+| `putFileMultipart`        | `(path: string, file: any, options?: MultipartUploadOptions) => Promise<string \| false>`            | Path or `false`   |
 
 ### Configuration Types
 
@@ -639,7 +666,7 @@ The interface all drivers implement.
 
 ```typescript
 interface StorageModuleOptions {
-  default: string;  // Name of the default disk
+  default: string; // Name of the default disk
   disks: {
     [name: string]: DiskConfig;
   };
@@ -651,28 +678,28 @@ interface StorageModuleOptions {
 ```typescript
 interface DiskConfig {
   driver: 'local' | 's3' | 'gcs' | 'r2' | (string & {});
-  root?: string;                // Local: root directory
-  url?: string;                 // Base URL for public URLs
-  throw?: boolean;              // Throw on errors (default: true)
-  visibility?: 'private' | 'public';  // Default visibility
+  root?: string; // Local: root directory
+  url?: string; // Base URL for public URLs
+  throw?: boolean; // Throw on errors (default: true)
+  visibility?: 'private' | 'public'; // Default visibility
 
   // S3 / R2 shared
-  key?: string;                 // Access key
-  secret?: string;              // Secret key
-  region?: string;              // AWS region
-  bucket?: string;              // Bucket name
-  endpoint?: string;            // Custom endpoint
+  key?: string; // Access key
+  secret?: string; // Secret key
+  region?: string; // AWS region
+  bucket?: string; // Bucket name
+  endpoint?: string; // Custom endpoint
   use_path_style_endpoint?: boolean;
 
   // R2-specific
-  accountId?: string;           // Cloudflare account ID
+  accountId?: string; // Cloudflare account ID
 
   // GCS-specific
-  projectId?: string;           // Google Cloud project ID
-  keyFilename?: string;         // Path to service account key
-  credentials?: Record<string, any>;  // Credentials object
+  projectId?: string; // Google Cloud project ID
+  keyFilename?: string; // Path to service account key
+  credentials?: Record<string, any>; // Credentials object
 
-  [key: string]: any;           // Extensibility for custom drivers
+  [key: string]: any; // Extensibility for custom drivers
 }
 ```
 
@@ -740,26 +767,26 @@ interface FileMetadata {
 
 Exported from `@fozooni/nestjs-storage`:
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `generateUniqueFilename` | `(originalName: string) => string` | Generate timestamped unique filename |
-| `sanitizePath` | `(filePath: string) => string` | Remove leading slashes |
-| `getContentType` | `(filename: string) => string` | MIME type from filename |
-| `getFileExtension` | `(filename: string) => string` | File extension without dot |
-| `normalizePath` | `(filePath: string) => string` | Normalize path separators to `/` |
-| `joinPaths` | `(...paths: string[]) => string` | Join path segments |
-| `getDirectory` | `(filePath: string) => string` | Directory part of a path |
-| `getFilename` | `(filePath: string) => string` | Filename part of a path |
-| `isDirectory` | `(path: string) => boolean` | Check if path ends with `/` |
-| `parseS3Url` | `(url: string) => { bucket, key } \| null` | Parse S3 URL formats |
-| `encodeS3Key` | `(key: string) => string` | URL-encode S3 key preserving `/` |
-| `buildS3Url` | `(bucket, key, region?) => string` | Build S3 public URL |
-| `streamToBuffer` | `(stream: ReadableStream) => Promise<Buffer>` | Convert stream to buffer |
-| `streamToString` | `(stream: ReadableStream) => Promise<string>` | Convert stream to string |
-| `isStream` | `(value: any) => boolean` | Check if value is a stream |
-| `formatFileSize` | `(bytes: number) => string` | Human-readable file size |
-| `visibilityToAcl` | `(visibility?) => string` | Convert visibility to S3 ACL |
-| `aclToVisibility` | `(acl?) => 'private' \| 'public'` | Convert S3 ACL to visibility |
+| Function                 | Signature                                     | Description                          |
+| ------------------------ | --------------------------------------------- | ------------------------------------ |
+| `generateUniqueFilename` | `(originalName: string) => string`            | Generate timestamped unique filename |
+| `sanitizePath`           | `(filePath: string) => string`                | Remove leading slashes               |
+| `getContentType`         | `(filename: string) => string`                | MIME type from filename              |
+| `getFileExtension`       | `(filename: string) => string`                | File extension without dot           |
+| `normalizePath`          | `(filePath: string) => string`                | Normalize path separators to `/`     |
+| `joinPaths`              | `(...paths: string[]) => string`              | Join path segments                   |
+| `getDirectory`           | `(filePath: string) => string`                | Directory part of a path             |
+| `getFilename`            | `(filePath: string) => string`                | Filename part of a path              |
+| `isDirectory`            | `(path: string) => boolean`                   | Check if path ends with `/`          |
+| `parseS3Url`             | `(url: string) => { bucket, key } \| null`    | Parse S3 URL formats                 |
+| `encodeS3Key`            | `(key: string) => string`                     | URL-encode S3 key preserving `/`     |
+| `buildS3Url`             | `(bucket, key, region?) => string`            | Build S3 public URL                  |
+| `streamToBuffer`         | `(stream: ReadableStream) => Promise<Buffer>` | Convert stream to buffer             |
+| `streamToString`         | `(stream: ReadableStream) => Promise<string>` | Convert stream to string             |
+| `isStream`               | `(value: any) => boolean`                     | Check if value is a stream           |
+| `formatFileSize`         | `(bytes: number) => string`                   | Human-readable file size             |
+| `visibilityToAcl`        | `(visibility?) => string`                     | Convert visibility to S3 ACL         |
+| `aclToVisibility`        | `(acl?) => 'private' \| 'public'`             | Convert S3 ACL to visibility         |
 
 ## Testing
 
@@ -796,10 +823,7 @@ const mockStorage = {
 };
 
 const module = await Test.createTestingModule({
-  providers: [
-    YourService,
-    { provide: StorageService, useValue: mockStorage },
-  ],
+  providers: [YourService, { provide: StorageService, useValue: mockStorage }],
 }).compile();
 ```
 
