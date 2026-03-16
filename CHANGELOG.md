@@ -65,7 +65,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - esbuild minification enabled (`minify: true`) — JS bundles reduced by ~51% (168 KB → 82 KB CJS, 163 KB → 81 KB ESM)
 - esbuild tree-shaking enabled (`treeshake: true`) — dead code eliminated at build time
 - `keepNames: true` — class and function names preserved for NestJS DI compatibility
-- Build target updated to `node18` — avoids unnecessary ES2021 → ES5 down-transpilation, allowing more efficient output
+- Build target updated to `node18` — esbuild emits native class fields, async generators, and optional chaining without down-transpilation; fully compatible with Node 18, 20, and 22
 - Source map files (`.map`) excluded from the published npm package via `files` field — npm install size reduced from ~1.1 MB to ~283 KB (**74% smaller**)
 - Source maps are still generated locally for development and debugging
 
@@ -98,6 +98,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Added
 
 #### File Naming Strategies
+
 - `NamingStrategy` interface — implement `generate(file, originalName)` for custom filename logic
 - `UuidNamingStrategy` — generates `{randomUUID()}{ext}` using Node.js `crypto.randomUUID()`
 - `HashNamingStrategy` — generates `{md5(content)}{ext}`, consistent for identical content
@@ -107,6 +108,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `namingStrategy` field on `DiskConfig` — set a disk-level default in module config
 
 #### StorageFileInterceptor
+
 - `StorageFileInterceptor(fieldName, options?)` — NestJS interceptor factory that parses a single-file multipart upload via `multer` and stores it to a disk in one step; replaces `req.file` with a `StoredFile` object
 - `StorageFilesInterceptor(fieldName, maxCount, options?)` — multi-file variant; replaces `req.files` with `StoredFile[]`
 - `StoredFile` interface — `{ path, url, size, mimetype, originalname, disk }`
@@ -114,10 +116,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `multer` added as optional peer dependency (`^1.4.5 || ^2.0.0`)
 
 #### File Validation Pipes
+
 - `FileExtensionValidator` — extends `FileValidator` from `@nestjs/common`; validates `originalname` extension case-insensitively against an `allowedExtensions` whitelist (leading dot optional)
 - `MagicBytesValidator` — extends `FileValidator`; reads the first bytes of `file.buffer` against a built-in magic signatures map; prevents extension spoofing without external dependencies
 
 #### Storage Event System
+
 - `StorageEventsService` — injectable service wrapping Node.js `EventEmitter`; provides `on()`, `off()`, `once()`, `emit()`
 - `StorageEvents` constants — `PUT`, `PUT_FILE`, `DELETE`, `COPY`, `MOVE`, `DELETE_MANY`
 - `StorageService` now emits typed events after every mutating operation (`put`, `putFile`, `delete`, `copy`, `move`, `deleteMany`)
@@ -126,6 +130,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `StorageEventsService` exported from `StorageModule` for direct injection
 
 #### Scoped Disks
+
 - `ScopedDisk` — full `FilesystemContract` implementation that transparently prepends a path prefix to all operations and strips it from returned paths
 - `storage.scope(prefix, diskName?)` — create a scoped disk from `StorageService`
 - `disk.scope(prefix)` — create a scoped disk from any `FilesystemContract` instance (Local, S3, R2, GCS, FakeDisk)
@@ -149,11 +154,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Added
 
 #### `@InjectDisk()` Decorator
+
 - `@InjectDisk(name)` — inject a specific disk directly into any provider via NestJS DI
 - Disk providers auto-registered for all configured disk names when using `forRoot()`
 - `injectDisks: string[]` option on `forRootAsync()` — specify which disks to register as providers when using factory/class/existing patterns
 
 #### Testing Utilities
+
 - `FakeDisk` — full in-memory `FilesystemContract` implementation for unit testing without touching real storage
 - `StorageTestUtils.fake(storageService, diskName?)` — swap a real disk for a `FakeDisk` in tests
 - `StorageTestUtils.fakeFile(options?)` — create a mock `Express.Multer.File` for upload testing
@@ -161,6 +168,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Assertion methods on `FakeDisk`: `assertExists()`, `assertMissing()`, `assertCount()`, `assertDirectoryEmpty()`, `assertContentEquals()`, `getStoredFiles()`, `getStoredFile()`, `reset()`
 
 #### Health Checks
+
 - `StorageHealthIndicator` — `@nestjs/terminus` health indicator performing a write/read/delete cycle
 - `check(key, diskName?, options?)` — check a single disk
 - `checkDisks(key, diskNames[], options?)` — check multiple disks in parallel, reports per-disk status
@@ -168,6 +176,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `@nestjs/terminus` added as optional peer dependency
 
 #### Convenience Methods
+
 - `missing(path)` — inverse of `exists()`; returns `true` if the file does not exist
 - `json<T>(path)` — read and JSON-parse a file in one call
 - `checksum(path, algorithm?)` — compute file checksum; supports `'md5'` (default), `'sha1'`, `'sha256'`
@@ -176,6 +185,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - Added as optional (`?`) to `FilesystemContract` — existing custom drivers are unaffected
 
 #### Streamable Downloads
+
 - `getStreamableFile(path, options?)` — returns a NestJS `StreamableFile` with `Content-Type`, `Content-Length`, and `Content-Disposition` headers set automatically
 - `StreamableFileOptions` — `{ filename?, disposition? }` (`'attachment'` or `'inline'`)
 
@@ -191,6 +201,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 ### Added
 
 #### Core Module
+
 - `StorageModule.forRoot(config)` — static module registration
 - `StorageModule.forRootAsync(options)` — async registration supporting `useFactory`, `useClass`, and `useExisting`
 - `isGlobal` option — register as a NestJS global module (default: `true`)
@@ -198,6 +209,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `@InjectStorage()` decorator — alternative to constructor-type injection
 
 #### Drivers
+
 - **Local** — stores files on the local filesystem; path-traversal protection built-in
 - **S3** — Amazon S3 and S3-compatible storage via `@aws-sdk/client-s3`
 - **R2** — Cloudflare R2 via the S3-compatible API; endpoint auto-configured from `accountId`
@@ -205,6 +217,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - All SDKs are optional peer dependencies — install only what you use
 
 #### FilesystemContract API
+
 - `exists(path)` — check file existence
 - `get(path, options?)` — read a file as `Buffer`, `string`, or `ReadableStream`
 - `put(path, contents, options?)` — write a file; supports `string`, `Buffer`, `ReadableStream`
@@ -230,6 +243,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `initMultipartUpload` / `uploadPart` / `completeMultipartUpload` / `abortMultipartUpload` / `putFileMultipart` — chunked uploads for large files
 
 #### Multiple Disks
+
 - `storage.disk(name?)` — get a disk by name (default disk if omitted)
 - `storage.diskByBucket(bucket)` — look up a disk by its bucket name
 - `storage.cloud()` — shortcut for `storage.disk('main')`
@@ -238,12 +252,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `storage.setDisk(name, disk)` — replace a disk instance at runtime
 
 #### `PutOptions`
+
 - `visibility`, `mimetype`, `metadata`, `filename`, `CacheControl`, `ContentDisposition`, `ContentEncoding`, `ContentLanguage`, `Expires`
 
 #### Utilities (exported from package root)
+
 - `generateUniqueFilename`, `sanitizePath`, `getContentType`, `getFileExtension`, `normalizePath`, `joinPaths`, `getDirectory`, `getFilename`, `isDirectory`, `parseS3Url`, `encodeS3Key`, `buildS3Url`, `streamToBuffer`, `streamToString`, `isStream`, `formatFileSize`, `visibilityToAcl`, `aclToVisibility`
 
 #### Infrastructure
+
 - GitHub Actions CI — runs tests on Node 18, 20, and 22 on every push
 - Dual CJS + ESM + DTS build via `tsup`
 - Full TypeScript declarations included
