@@ -4,6 +4,7 @@ import { Readable } from 'stream';
 import { ScopedDisk } from '../disk/scoped-disk';
 import type {
   ChecksumAlgorithm,
+  ConditionalWriteResult,
   CopyOptions,
   DeleteManyResult,
   FileMetadata,
@@ -14,6 +15,8 @@ import type {
   MultipartUploadOptions,
   MultipartUploadPart,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 import {
@@ -43,6 +46,8 @@ export class FakeDisk implements FilesystemContract {
     string,
     { key: string; parts: Map<number, Buffer>; options?: PutOptions }
   > = new Map();
+  /** MD5 etags tracked for conditional write support. */
+  private etags: Map<string, string> = new Map();
 
   // --- Core FilesystemContract implementation ---
 
@@ -92,6 +97,9 @@ export class FakeDisk implements FilesystemContract {
       createdAt: existing?.createdAt || new Date(),
       updatedAt: new Date(),
     });
+
+    // Track etag for conditional write support
+    this.etags.set(key, createHash('md5').update(buffer).digest('hex'));
 
     this.ensureParentDirectories(key);
     return true;
@@ -435,6 +443,48 @@ export class FakeDisk implements FilesystemContract {
     return new ScopedDisk(this, prefix);
   }
 
+  // --- v0.1.0: Range requests + conditional writes ---
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    const key = normalizePath(path);
+    const file = this.store.get(key);
+    if (!file) throw new Error(`File not found: ${path}`);
+    const totalSize = file.content.length;
+    const start = options.start;
+    const end = options.end !== undefined ? options.end : totalSize - 1;
+    const slice = file.content.slice(start, end + 1);
+    const stream = Readable.from(slice);
+    return {
+      stream,
+      size: slice.length,
+      contentRange: `bytes ${start}-${end}/${totalSize}`,
+      totalSize,
+    };
+  }
+
+  async putIfMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    etag: string,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    const key = normalizePath(path);
+    const currentEtag = this.etags.get(key);
+    if (!currentEtag || currentEtag !== etag) return { success: false };
+    await this.put(path, content, opts);
+    return { success: true, etag: this.etags.get(key) };
+  }
+
+  async putIfNoneMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    if (this.store.has(normalizePath(path))) return { success: false };
+    await this.put(path, content, opts);
+    return { success: true, etag: this.etags.get(normalizePath(path)) };
+  }
+
   // --- Assertion methods ---
 
   assertExists(path: string, message?: string): void {
@@ -486,6 +536,7 @@ export class FakeDisk implements FilesystemContract {
     this.store.clear();
     this.directoryStore.clear();
     this.multipartUploads.clear();
+    this.etags.clear();
   }
 
   // --- Private helpers ---

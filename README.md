@@ -55,6 +55,13 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 - **TypeScript Generics** — `getMetadata<T>()`, `json<T>(path, schema?)`, `S3FileMetadata`, `GcsFileMetadata`
 - **Dual CJS/ESM** — Ships both CommonJS and ES modules with TypeScript declarations
 - **Optional Peer Dependencies** — Only install the SDK you need
+- **VersionedDisk** — Automatic file snapshots on every write; list/get/restore/delete versions
+- **RouterDisk** — Content-aware routing: route by extension, prefix, MIME type, size, or custom predicate
+- **Range Requests** — HTTP 206 partial content via `getRange()`, `serveRange()`, and `@RangeServe()` decorator
+- **StorageMigrator** — Async-generator migration service with checksum verification, concurrency control, and dry-run
+- **SSE Upload Progress** — RxJS `Subject`-based multipart upload progress tracking via `StorageUploadProgressService`
+- **StorageArchiver** — Streaming ZIP and TAR archives across disks without buffering all content
+- **Concurrent Write Protection** — Optimistic locking via `putIfMatch()` and `putIfNoneMatch()`
 
 ## Table of Contents
 
@@ -118,6 +125,13 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
   - [Temporary Files with TTL](#temporary-files-with-ttl)
   - [TypeScript Generics](#typescript-generics)
   - [Health Checks](#health-checks)
+  - [File Versioning (VersionedDisk)](#file-versioning-versioneddisk)
+  - [Storage Routing (RouterDisk)](#storage-routing-routerdisk)
+  - [Range Requests / Partial Content](#range-requests--partial-content)
+  - [Disk Migration (StorageMigrator)](#disk-migration-storagemigrator)
+  - [SSE Upload Progress](#sse-upload-progress)
+  - [Streaming Archives (StorageArchiver)](#streaming-archives-storagearchiver)
+  - [Concurrent Write Protection](#concurrent-write-protection)
   - [Testing](#testing)
     - [Using FakeDisk](#using-fakedisk)
     - [StorageTestUtils](#storagetestutils)
@@ -2164,6 +2178,370 @@ Invalid disk configs (e.g. missing `bucket` for S3) now throw `StorageConfigurat
 ### `StorageTempCleanupService` is now exported
 
 `StorageTempCleanupService` is now automatically exported from `StorageModule`. You can inject it in any service without additional registration.
+
+---
+
+## File Versioning (VersionedDisk)
+
+`VersionedDisk` wraps any disk and automatically snapshots the previous content of a file before overwriting it. Snapshots are stored in a `.versions/{path}/` directory on the same disk.
+
+```typescript
+import { VersionedDisk } from '@fozooni/nestjs-storage';
+
+const versioned = storage.withVersioning('local');
+// or directly:
+const versioned = new VersionedDisk(storage.disk('local'));
+
+await versioned.put('config.json', '{"v":1}');
+await versioned.put('config.json', '{"v":2}'); // v1 is now a snapshot
+
+const versions = await versioned.listVersions('config.json');
+// [{ versionId: '...', size: 9, lastModified: Date, isLatest: false }]
+
+const buf = await versioned.getVersion('config.json', versions[0].versionId);
+// Buffer of the v1 content
+
+await versioned.restoreVersion('config.json', versions[0].versionId);
+await versioned.deleteVersion('config.json', versions[0].versionId);
+```
+
+**API**
+
+| Method | Description |
+|---|---|
+| `listVersions(path)` | Returns all snapshots sorted oldest-first; the most recently created has `isLatest: true` |
+| `getVersion(path, versionId)` | Retrieve a snapshot as a `Buffer` |
+| `restoreVersion(path, versionId)` | Copy the snapshot back to the live path |
+| `deleteVersion(path, versionId)` | Delete a single snapshot |
+
+> Versioning errors never block the actual write — failures are silently swallowed.
+
+---
+
+## Storage Routing (RouterDisk)
+
+`RouterDisk` dispatches reads and writes to different underlying disks based on routing rules. First-match wins on write; the same rule is applied on read.
+
+```typescript
+import {
+  RouterDisk,
+  byExtension,
+  byPrefix,
+  byMimeType,
+  bySize,
+  custom,
+} from '@fozooni/nestjs-storage';
+
+const images = storage.disk('s3-images');
+const docs   = storage.disk('s3-docs');
+const cold   = storage.disk('s3-cold');
+
+const router = storage.withRouting(
+  [
+    byExtension(['.jpg', '.png', '.gif', '.webp'], images),
+    byPrefix('docs/', docs),
+    byMimeType(['application/pdf'], docs),
+    bySize(10 * 1024 * 1024, cold),   // ≤ 10 MB → cold storage
+    custom((path) => path.endsWith('.log'), cold),
+  ],
+  storage.disk('s3-default'),
+);
+
+await router.put('hero.jpg', buffer);          // → images disk
+await router.put('docs/report.pdf', buffer);   // → docs disk (prefix wins first)
+await router.put('big-archive.zip', buffer);   // depends on size
+await router.put('other.txt', buffer);         // → default disk
+```
+
+**Route factories**
+
+| Factory | Match condition |
+|---|---|
+| `byExtension(exts[], disk)` | File extension matches |
+| `byPrefix(prefix, disk)` | Path starts with prefix |
+| `byMimeType(types[], disk)` | MIME type matches (write-time only) |
+| `bySize(maxBytes, disk)` | Content size ≤ maxBytes (write-time only) |
+| `custom(fn, disk)` | User-supplied predicate |
+
+> `byMimeType` and `bySize` are only evaluated at write time (the content is available). At read time, only `byExtension` and `byPrefix` can match deterministically; unmatched reads fall through to the default disk.
+
+---
+
+## Range Requests / Partial Content
+
+All built-in drivers support HTTP range requests (HTTP 206) via `getRange()`. `StorageService.serveRange()` handles the full request lifecycle including header parsing and response piping.
+
+### `getRange(path, options)`
+
+```typescript
+const { stream, size, contentRange, totalSize } = await disk.getRange('video.mp4', {
+  start: 0,
+  end: 1_048_575, // first 1 MB
+});
+// contentRange = 'bytes 0-1048575/52428800'
+```
+
+### `StorageService.serveRange()`
+
+```typescript
+@Controller('files')
+export class FilesController {
+  constructor(private readonly storage: StorageService) {}
+
+  @Get(':filename')
+  async stream(@Param('filename') filename: string, @Req() req: Request, @Res() res: Response) {
+    await this.storage.serveRange(filename, req, res, 'videos');
+    // Automatically sends 206 with correct headers, or 200 when no Range header present.
+  }
+}
+```
+
+### `@RangeServe(diskName?)` decorator
+
+```typescript
+import { RangeServe, RANGE_SERVE_DISK_KEY } from '@fozooni/nestjs-storage';
+
+@Controller('media')
+export class MediaController {
+  @Get(':file')
+  @RangeServe('videos')
+  serve(@Param('file') file: string) {
+    // The diskName 'videos' is stored as method metadata under RANGE_SERVE_DISK_KEY
+    // for your own interceptor to read and call serveRange() automatically.
+  }
+}
+```
+
+---
+
+## Disk Migration (StorageMigrator)
+
+`StorageMigrator` is an `@Injectable()` service that copies files from one disk to another using an async generator — never loading all files into memory at once.
+
+```typescript
+import { StorageMigrator } from '@fozooni/nestjs-storage';
+
+@Injectable()
+export class MigrationService {
+  constructor(private readonly migrator: StorageMigrator) {}
+
+  async run() {
+    const source = this.storage.disk('old-s3');
+    const target = this.storage.disk('new-s3');
+
+    for await (const event of this.migrator.migrate(source, target, {
+      prefix: 'uploads/',
+      concurrency: 10,
+      verify: true,
+      deleteSource: false,
+      dryRun: false,
+      onError: 'skip',
+    })) {
+      if (event.status === 'copied') {
+        console.log(`✓ ${event.path} (${event.bytesTransferred} bytes)`);
+      } else if (event.status === 'failed') {
+        console.error(`✗ ${event.path}:`, event.error?.message);
+      }
+    }
+  }
+}
+```
+
+**Options**
+
+| Option | Default | Description |
+|---|---|---|
+| `prefix` | `undefined` | Only migrate files whose path starts with this prefix |
+| `concurrency` | `5` | Max concurrent copy operations |
+| `verify` | `false` | Checksum verify after each copy |
+| `deleteSource` | `false` | Delete source file after successful copy |
+| `dryRun` | `false` | Simulate migration — no writes |
+| `onError` | `'skip'` | `'skip'` continues on failure; `'abort'` throws |
+
+**Progress event statuses:** `'pending'` → `'copied'` or `'failed'`
+
+---
+
+## SSE Upload Progress
+
+`StorageUploadProgressService` connects multipart upload callbacks to RxJS `Observable` streams. Inject it, push updates from your upload logic, and subscribe from a controller.
+
+```typescript
+import { StorageUploadProgressService } from '@fozooni/nestjs-storage';
+
+// In your upload service:
+@Injectable()
+export class UploadService {
+  constructor(private readonly progress: StorageUploadProgressService) {}
+
+  async upload(file: Buffer, uploadId: string) {
+    await disk.putFileMultipart('large.zip', file, {
+      onProgress: (uploaded, total) => {
+        this.progress.track(uploadId, {
+          uploadId,
+          key: 'large.zip',
+          uploadedBytes: uploaded,
+          totalBytes: total,
+          completedParts: 0,
+          totalParts: 1,
+        });
+      },
+    });
+    this.progress.complete(uploadId);
+  }
+}
+
+// In your SSE controller:
+@Get('progress/:id')
+@Sse()
+stream(@Param('id') id: string): Observable<MessageEvent> {
+  return this.progress.getProgress$(id).pipe(
+    map((status) => ({ data: status })),
+  );
+}
+```
+
+**API**
+
+| Method | Description |
+|---|---|
+| `track(uploadId, status)` | Push a status update |
+| `getProgress$(uploadId)` | Observable that emits status updates |
+| `complete(uploadId)` | Complete the observable (upload done) |
+| `error(uploadId, err)` | Error the observable (upload failed) |
+
+---
+
+## Streaming Archives (StorageArchiver)
+
+`StorageArchiver` creates ZIP or TAR archives from files on a disk, streaming each file without buffering all content in memory.
+
+Requires the optional peer:
+```bash
+npm install archiver
+```
+
+```typescript
+import { StorageArchiver } from '@fozooni/nestjs-storage';
+
+@Controller('archives')
+export class ArchiveController {
+  constructor(private readonly archiver: StorageArchiver) {}
+
+  @Get('download')
+  async download(@Res() res: Response) {
+    const disk = this.storage.disk('uploads');
+    const stream = await this.archiver.createZip(
+      [
+        { path: 'reports/2026-01.pdf' },
+        { path: 'reports/2026-02.pdf', name: 'february.pdf' },
+      ],
+      disk,
+      { zlib: { level: 6 } },
+    );
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="reports.zip"');
+    stream.pipe(res);
+  }
+}
+```
+
+**API**
+
+| Method | Description |
+|---|---|
+| `createZip(files, disk, opts?)` | Returns a ZIP `ReadableStream` |
+| `createTar(files, disk, opts?)` | Returns a TAR `ReadableStream` |
+
+Each file entry: `{ path: string; name?: string }`. `name` overrides the entry name inside the archive.
+
+---
+
+## Concurrent Write Protection
+
+`putIfMatch` and `putIfNoneMatch` enable optimistic locking for concurrent write scenarios.
+
+### `putIfMatch(path, content, etag, opts?)`
+
+Only writes if the current file's ETag matches the provided value. Use this to implement compare-and-swap.
+
+```typescript
+// 1. Read the current file and its etag
+const meta = await disk.getMetadata('settings.json');
+const currentEtag = meta.etag;
+
+// 2. Conditional write — only succeeds if the file hasn't changed
+const { success, etag: newEtag } = await disk.putIfMatch(
+  'settings.json',
+  JSON.stringify(newSettings),
+  currentEtag,
+);
+
+if (!success) {
+  throw new ConflictException('settings.json was modified by another process');
+}
+```
+
+### `putIfNoneMatch(path, content, opts?)`
+
+Only writes if the file does not yet exist. Use this to prevent accidental overwrites.
+
+```typescript
+const { success } = await disk.putIfNoneMatch('config/init.json', defaultConfig);
+if (!success) {
+  console.log('Init config already exists — skipping.');
+}
+```
+
+**Driver support**
+
+| Driver | `putIfMatch` | `putIfNoneMatch` |
+|---|---|---|
+| `LocalDisk` | MD5-based | Existence check |
+| `S3Disk` (and R2, MinIO, B2, DO, Wasabi) | `IfMatch` header | `IfNoneMatch: *` |
+| `FakeDisk` | MD5-based | Existence check |
+
+## Upgrading to v0.1.0
+
+v0.1.0 is **fully backwards compatible**. All changes are additive. No breaking changes.
+
+### New optional peer dependencies
+
+Install only what you use:
+
+```bash
+# Streaming ZIP/TAR archives
+npm install archiver
+```
+
+### New auto-registered services
+
+`StorageMigrator`, `StorageUploadProgressService`, and `StorageArchiver` are now automatically registered and exported by `StorageModule`. You can inject them directly:
+
+```typescript
+constructor(
+  private readonly migrator: StorageMigrator,
+  private readonly progress: StorageUploadProgressService,
+  private readonly archiver: StorageArchiver,
+) {}
+```
+
+### New FilesystemContract optional methods
+
+The following optional methods are now defined on `FilesystemContract` and delegated by `DiskDecorator`:
+
+```typescript
+listVersions?(path): Promise<FileVersion[]>
+getVersion?(path, versionId): Promise<Buffer>
+restoreVersion?(path, versionId): Promise<boolean>
+deleteVersion?(path, versionId): Promise<boolean>
+getRange?(path, opts: RangeOptions): Promise<RangeResult>
+putIfMatch?(path, content, etag, opts?): Promise<ConditionalWriteResult>
+putIfNoneMatch?(path, content, opts?): Promise<ConditionalWriteResult>
+```
+
+These are implemented on `LocalDisk`, `S3Disk` (and its subclasses), `GcsDisk`, `AzureDisk`, and `FakeDisk`.
 
 ## License
 

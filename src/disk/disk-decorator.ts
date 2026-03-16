@@ -1,8 +1,10 @@
 import {
   ChecksumAlgorithm,
+  ConditionalWriteResult,
   CopyOptions,
   DeleteManyResult,
   FileMetadata,
+  FileVersion,
   FilesystemContract,
   GetOptions,
   MoveOptions,
@@ -12,6 +14,8 @@ import {
   PresignedPostData,
   PresignedPostOptions,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 
@@ -271,5 +275,51 @@ export abstract class DiskDecorator implements FilesystemContract {
   async invalidateCdn(paths: string[]): Promise<void> {
     if (this.disk.invalidateCdn) return this.disk.invalidateCdn(paths);
     // No-op by default
+  }
+
+  // ─── v0.1.0 optional method delegations ──────────────────────────────────
+
+  async listVersions(path: string): Promise<FileVersion[]> {
+    if (!this.disk.listVersions) throw new Error('Disk does not support listVersions()');
+    return this.disk.listVersions(path);
+  }
+
+  async getVersion(path: string, versionId: string): Promise<Buffer> {
+    if (!this.disk.getVersion) throw new Error('Disk does not support getVersion()');
+    return this.disk.getVersion(path, versionId);
+  }
+
+  async restoreVersion(path: string, versionId: string): Promise<boolean> {
+    if (!this.disk.restoreVersion) throw new Error('Disk does not support restoreVersion()');
+    return this.disk.restoreVersion(path, versionId);
+  }
+
+  async deleteVersion(path: string, versionId: string): Promise<boolean> {
+    if (!this.disk.deleteVersion) throw new Error('Disk does not support deleteVersion()');
+    return this.disk.deleteVersion(path, versionId);
+  }
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    if (!this.disk.getRange) throw new Error('Disk does not support getRange()');
+    return this.disk.getRange(path, options);
+  }
+
+  async putIfMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    etag: string,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    if (!this.disk.putIfMatch) throw new Error('Disk does not support putIfMatch()');
+    return this.disk.putIfMatch(path, content, etag, opts);
+  }
+
+  async putIfNoneMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    if (!this.disk.putIfNoneMatch) throw new Error('Disk does not support putIfNoneMatch()');
+    return this.disk.putIfNoneMatch(path, content, opts);
   }
 }

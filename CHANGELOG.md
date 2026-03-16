@@ -6,6 +6,109 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.1.0] — 2026-03-16
+
+### Added
+
+#### VersionedDisk Decorator
+
+- **`VersionedDisk`** — extends `DiskDecorator`. Automatically snapshots the current file content to `.versions/{path}/{timestamp}_{uuid}` before every overwrite. Versioning failures are silently swallowed so they never block the actual write.
+- `listVersions(path): Promise<FileVersion[]>` — returns all snapshots sorted oldest-first; `isLatest: true` on the most recently created version. `FileVersion: { versionId, size, lastModified, isLatest, checksum? }`.
+- `getVersion(path, versionId): Promise<Buffer>` — retrieve any snapshot as a Buffer.
+- `restoreVersion(path, versionId): Promise<boolean>` — copy a snapshot back to the live path.
+- `deleteVersion(path, versionId): Promise<boolean>` — remove a single snapshot.
+- `StorageService.withVersioning(diskName)` factory method.
+
+#### RouterDisk + Route Factories
+
+- **`RouterDisk`** — extends `DiskDecorator`. Dispatches reads and writes to different disks based on an ordered list of `StorageRoute` rules. First-match wins on write; same rule applied at read time (size/mime routes fall back to default disk at read time since content is unknown).
+- **`byExtension(exts[], disk)`** — match on file extension.
+- **`byPrefix(prefix, disk)`** — match on path prefix.
+- **`byMimeType(mimetypes[], disk)`** — match on MIME type (write-time only).
+- **`bySize(maxBytes, disk)`** — match when content size ≤ maxBytes (write-time only).
+- **`custom(fn, disk)`** — user-supplied `(path, mimetype?, size?) => boolean` predicate.
+- `StorageService.withRouting(routes, defaultDisk)` factory method.
+- Cross-disk `copy()` and `move()` supported transparently.
+
+#### Range Requests / Partial Content
+
+- **`getRange(path, options: RangeOptions): Promise<RangeResult>`** — new optional method on `FilesystemContract`.
+  - `RangeOptions: { start: number; end?: number }`.
+  - `RangeResult: { stream: NodeJS.ReadableStream; size: number; contentRange: string; totalSize: number }`.
+  - Implemented on: `LocalDisk` (`fs.createReadStream`), `S3Disk` (`Range` header on `GetObjectCommand`), `GcsDisk` (`createReadStream({ start, end })`), `AzureDisk` (`blockBlobClient.download(start, count)`), `FakeDisk` (Buffer slice).
+- **`StorageService.serveRange(path, req, res, diskName?)`** — parses `Range` header, sets `Content-Range` / `Content-Length` / `Accept-Ranges: bytes`, pipes stream. Returns HTTP 206 with range or 200 for full content. Handles `bytes=start-end`, `bytes=start-`, and `bytes=-suffix` formats.
+- **`@RangeServe(diskName?)`** — method decorator that attaches disk name metadata under `RANGE_SERVE_DISK_KEY` for use with custom interceptors.
+
+#### Concurrent Write Protection
+
+- **`putIfMatch(path, content, etag, opts?): Promise<ConditionalWriteResult>`** — new optional method. Writes only when the current file's ETag matches the supplied value. `ConditionalWriteResult: { success: boolean; etag?: string }`.
+  - `LocalDisk`: MD5 comparison.
+  - `S3Disk`: `IfMatch` on `PutObjectCommand`.
+  - `FakeDisk`: MD5-based.
+- **`putIfNoneMatch(path, content, opts?): Promise<ConditionalWriteResult>`** — writes only when the file does not exist.
+  - `LocalDisk`: existence check.
+  - `S3Disk`: `IfNoneMatch: '*'` on `PutObjectCommand`.
+  - `FakeDisk`: existence check.
+
+#### StorageMigrator
+
+- **`StorageMigrator`** — `@Injectable()` service. `async *migrate(source, target, opts?): AsyncGenerator<MigrationProgress>` streams files from source to target in concurrent batches.
+- Yields `'pending'` before each file and `'copied'` or `'failed'` after.
+- `MigrationOptions: { prefix?, concurrency=5, verify=false, deleteSource=false, dryRun=false, onError='skip'|'abort' }`.
+- `verify: true` computes checksums on both ends and fails the file on mismatch.
+- Files are streamed one at a time — never loaded all into memory.
+- Registered and exported by `StorageModule`.
+
+#### StorageUploadProgressService
+
+- **`StorageUploadProgressService`** — `@Injectable()` service using RxJS `Subject` per upload ID.
+- `track(uploadId, status)` — push a `MultipartUploadStatus` event.
+- `getProgress$(uploadId): Observable<MultipartUploadStatus>` — subscribe to progress updates.
+- `complete(uploadId)` — complete the observable.
+- `error(uploadId, err)` — error the observable.
+- Supports multiple concurrent uploads independently. Subjects are cleaned up on complete/error.
+- Registered and exported by `StorageModule`.
+
+#### StorageArchiver
+
+- **`StorageArchiver`** — `@Injectable()` service. `createZip(files, disk, opts?): Promise<NodeJS.ReadableStream>` and `createTar(files, disk, opts?)`.
+- Uses optional peer `archiver`. Throws `StorageConfigurationError` when not installed.
+- Files are appended as streams — archive is never buffered in memory.
+- `opts.zlib.level` configures ZIP compression level.
+- Each entry: `{ path: string; name?: string }`. `name` overrides the archive entry name.
+- Registered and exported by `StorageModule`.
+
+### Changed
+
+- **`FilesystemContract`** — added 7 new optional methods: `listVersions`, `getVersion`, `restoreVersion`, `deleteVersion`, `getRange`, `putIfMatch`, `putIfNoneMatch`.
+- **`DiskDecorator`** — added delegation stubs for all 7 new optional methods. `DiskDecorator` subclasses inherit correct delegation or throw `"Disk does not support X"` automatically.
+- **`StorageManager` interface** — added `withVersioning`, `withRouting`, `serveRange`.
+- **`StorageModule`** — `StorageMigrator`, `StorageUploadProgressService`, `StorageArchiver` are now auto-registered in both `forRoot()` and `forRootAsync()`.
+- **`src/disk/index.ts`** — exports `VersionedDisk`, `RouterDisk`, and all route factory functions.
+- **`src/index.ts`** — exports `migration`, `progress`, and `archiver` modules.
+- **`package.json`** — version bumped to `0.1.0`; added new optional peers/devDependencies (`archiver`).
+
+### New Interfaces
+
+```typescript
+interface FileVersion { versionId, size, lastModified, isLatest, checksum? }
+interface RangeOptions { start, end? }
+interface RangeResult { stream, size, contentRange, totalSize }
+interface ConditionalWriteResult { success, etag? }
+interface StorageRoute { match(path, mimetype?, size?): boolean; disk }
+interface MigrationProgress { path, status, error?, bytesTransferred? }
+interface MigrationOptions { prefix?, concurrency?, verify?, deleteSource?, dryRun?, onError? }
+interface ArchiverOptions { format?, zlib? }
+```
+
+### New Optional Peer Dependencies
+
+| Package | Used by |
+|---|---|
+| `archiver ^7` | `StorageArchiver` |
+
+---
+
 ## [0.0.5] — 2026-03-16
 
 ### Added

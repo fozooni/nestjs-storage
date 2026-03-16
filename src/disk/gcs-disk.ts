@@ -18,6 +18,8 @@ import {
   PresignedPostData,
   PresignedPostOptions,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 import { StorageConfigurationError, StorageNetworkError } from '../errors/storage-errors';
@@ -738,5 +740,25 @@ export class GcsDisk implements FilesystemContract {
     }
 
     return { succeeded, failed };
+  }
+
+  // ─── Range requests (HTTP 206 partial content) ────────────────────────────
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    const key = sanitizePath(path);
+    const rawBucket = this.client.getRawBucket();
+    const file = rawBucket.file(key);
+    const [metadata] = await file.getMetadata();
+    const totalSize = parseInt(metadata.size, 10);
+    const start = options.start;
+    const end = options.end !== undefined ? options.end : totalSize - 1;
+    const size = end - start + 1;
+    const stream = file.createReadStream({ start, end });
+    return {
+      stream,
+      size,
+      contentRange: `bytes ${start}-${end}/${totalSize}`,
+      totalSize,
+    };
   }
 }

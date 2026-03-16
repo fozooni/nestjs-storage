@@ -52,3 +52,8 @@ export * from './middleware';
 // v0.0.5 additions
 export * from './config';
 export * from './temp';
+
+// v0.1.0 additions
+export * from './migration';
+export * from './progress';
+export * from './archiver';

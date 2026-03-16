@@ -17,6 +17,8 @@ import {
   PresignedPostData,
   PresignedPostOptions,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 import {
@@ -749,5 +751,29 @@ export class AzureDisk implements FilesystemContract {
     }
 
     return { succeeded, failed };
+  }
+
+  // ─── Range requests (HTTP 206 partial content) ────────────────────────────
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    const key = sanitizePath(path);
+    try {
+      const blockBlobClient = this.containerClient.getBlockBlobClient(key);
+      const props = await blockBlobClient.getProperties();
+      const totalSize: number = props.contentLength ?? 0;
+      const start = options.start;
+      const end = options.end !== undefined ? options.end : totalSize - 1;
+      const count = end - start + 1;
+      const response = await blockBlobClient.download(start, count);
+      const stream = response.readableStreamBody as NodeJS.ReadableStream;
+      return {
+        stream,
+        size: count,
+        contentRange: `bytes ${start}-${end}/${totalSize}`,
+        totalSize,
+      };
+    } catch (error) {
+      mapAzureError(error, this.diskName, path);
+    }
   }
 }

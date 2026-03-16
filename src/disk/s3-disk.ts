@@ -1,11 +1,12 @@
 import { Readable } from 'stream';
 
-import { ObjectCannedACL } from '@aws-sdk/client-s3';
+import { GetObjectCommand, ObjectCannedACL, PutObjectCommand } from '@aws-sdk/client-s3';
 
 import { createHash } from 'crypto';
 
 import {
   ChecksumAlgorithm,
+  ConditionalWriteResult,
   CopyOptions,
   DeleteManyResult,
   DiskConfig,
@@ -19,6 +20,8 @@ import {
   PresignedPostData,
   PresignedPostOptions,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   S3FileMetadata,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
@@ -818,6 +821,104 @@ export class S3Disk implements FilesystemContract {
       }
 
       return { succeeded, failed };
+    }
+  }
+
+  // ─── Range requests (HTTP 206 partial content) ────────────────────────────
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    const key = sanitizePath(path);
+    const { start } = options;
+    const rangeEnd = options.end !== undefined ? options.end : '';
+    const rangeHeader = `bytes=${start}-${rangeEnd}`;
+
+    const command = new GetObjectCommand({
+      Bucket: this.client.getBucket(),
+      Key: key,
+      Range: rangeHeader,
+    });
+
+    const response = await this.client.getRawClient().send(command);
+    const stream = response.Body as NodeJS.ReadableStream;
+
+    // Parse totalSize from Content-Range: "bytes 0-999/5000"
+    const contentRange = response.ContentRange ?? '';
+    const totalSizeMatch = contentRange.match(/\/(\d+)$/);
+    const totalSize = totalSizeMatch
+      ? parseInt(totalSizeMatch[1], 10)
+      : (response.ContentLength ?? 0);
+    const rangeSize = response.ContentLength ?? 0;
+    const endByte = options.end !== undefined ? options.end : totalSize - 1;
+
+    return {
+      stream,
+      size: rangeSize,
+      contentRange: `bytes ${start}-${endByte}/${totalSize}`,
+      totalSize,
+    };
+  }
+
+  // ─── Concurrent write protection (optimistic locking) ────────────────────
+
+  async putIfMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    etag: string,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    const key = sanitizePath(path);
+    let body: string | Buffer | Readable = content as string | Buffer | Readable;
+    if (Buffer.isBuffer(content) || typeof content === 'string') {
+      body = content;
+    }
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.client.getBucket(),
+        Key: key,
+        Body: body,
+        ContentType: opts?.mimetype || getContentType(path),
+        IfMatch: etag,
+      });
+      const response = await this.client.getRawClient().send(command);
+      return { success: true, etag: response.ETag };
+    } catch (error: any) {
+      if (error?.name === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412) {
+        return { success: false };
+      }
+      throw error;
+    }
+  }
+
+  async putIfNoneMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    const key = sanitizePath(path);
+    let body: string | Buffer | Readable = content as string | Buffer | Readable;
+    if (Buffer.isBuffer(content) || typeof content === 'string') {
+      body = content;
+    }
+    try {
+      const command = new PutObjectCommand({
+        Bucket: this.client.getBucket(),
+        Key: key,
+        Body: body,
+        ContentType: opts?.mimetype || getContentType(path),
+        IfNoneMatch: '*',
+      });
+      const response = await this.client.getRawClient().send(command);
+      return { success: true, etag: response.ETag };
+    } catch (error: any) {
+      if (
+        error?.name === 'PreconditionFailed' ||
+        error?.name === 'ConditionalRequestConflict' ||
+        error?.$metadata?.httpStatusCode === 412 ||
+        error?.$metadata?.httpStatusCode === 409
+      ) {
+        return { success: false };
+      }
+      throw error;
     }
   }
 }

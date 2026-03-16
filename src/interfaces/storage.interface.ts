@@ -204,6 +204,94 @@ export interface StreamableFileOptions {
   filename?: string;
 }
 
+// ─── v0.1.0 Interfaces ────────────────────────────────────────────────────────
+
+/** A single historical version of a file, returned by `listVersions()`. */
+export interface FileVersion {
+  /** Unique version identifier (timestamp + UUID). */
+  versionId: string;
+  /** Size of this version in bytes. */
+  size: number;
+  /** When this version was created. */
+  lastModified: Date;
+  /** `true` for the most recently created version. */
+  isLatest: boolean;
+  /** Optional checksum of the version content. */
+  checksum?: string;
+}
+
+/** Options for partial-content / range requests. */
+export interface RangeOptions {
+  /** Zero-based start byte (inclusive). */
+  start: number;
+  /** Zero-based end byte (inclusive). Omit to read to end of file. */
+  end?: number;
+}
+
+/** Result of a partial-content range request. */
+export interface RangeResult {
+  /** Readable stream of the requested byte range. */
+  stream: NodeJS.ReadableStream;
+  /** Number of bytes in this range. */
+  size: number;
+  /** Value for the `Content-Range` response header, e.g. `bytes 0-999/5000`. */
+  contentRange: string;
+  /** Total size of the file in bytes. */
+  totalSize: number;
+}
+
+/** Result of a conditional write (optimistic locking). */
+export interface ConditionalWriteResult {
+  /** Whether the write succeeded (condition was met). */
+  success: boolean;
+  /** ETag of the newly written file (when `success` is `true`). */
+  etag?: string;
+}
+
+/**
+ * A routing rule for `RouterDisk`.
+ *
+ * `match()` receives the file path and optionally the mimetype / size at
+ * write time (only byExtension and byPrefix work deterministically at read
+ * time since size/mimetype are unknown).
+ */
+export interface StorageRoute {
+  match(path: string, mimetype?: string, size?: number): boolean;
+  disk: FilesystemContract;
+}
+
+/** Progress event emitted by `StorageMigrator.migrate()`. */
+export interface MigrationProgress {
+  path: string;
+  status: 'pending' | 'copied' | 'verified' | 'failed';
+  error?: Error;
+  bytesTransferred?: number;
+}
+
+/** Options for `StorageMigrator.migrate()`. */
+export interface MigrationOptions {
+  /** Only migrate files whose path starts with this prefix. */
+  prefix?: string;
+  /** Maximum number of concurrent copy operations (default: 5). */
+  concurrency?: number;
+  /** Verify integrity with checksum after each copy (default: false). */
+  verify?: boolean;
+  /** Delete source files after successful copy (default: false). */
+  deleteSource?: boolean;
+  /** Simulate migration without writing anything (default: false). */
+  dryRun?: boolean;
+  /** Error handling strategy: 'skip' (default) or 'abort'. */
+  onError?: 'skip' | 'abort';
+}
+
+/** Options for `StorageArchiver.createZip()` / `createTar()`. */
+export interface ArchiverOptions {
+  /** Archive format (default: determined by the method called). */
+  format?: 'zip' | 'tar';
+  /** Zlib compression options (zip only). */
+  zlib?: { level?: number };
+}
+
 // ─── v0.0.5 Interfaces ────────────────────────────────────────────────────────
 
 /**
@@ -379,6 +467,30 @@ export interface FilesystemContract {
 
   // CDN cache invalidation (optional — implemented by CdnDisk)
   invalidateCdn?(paths: string[]): Promise<void>;
+
+  // ─── v0.1.0 optional methods ──────────────────────────────────────────────
+
+  // File versioning (implemented by VersionedDisk decorator)
+  listVersions?(path: string): Promise<FileVersion[]>;
+  getVersion?(path: string, versionId: string): Promise<Buffer>;
+  restoreVersion?(path: string, versionId: string): Promise<boolean>;
+  deleteVersion?(path: string, versionId: string): Promise<boolean>;
+
+  // Partial content / range requests (HTTP 206)
+  getRange?(path: string, options: RangeOptions): Promise<RangeResult>;
+
+  // Concurrent write protection (optimistic locking)
+  putIfMatch?(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    etag: string,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult>;
+  putIfNoneMatch?(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult>;
 }
 
 export interface StorageManager {
@@ -400,6 +512,12 @@ export interface StorageManager {
   ): FilesystemContract;
   withTracing(diskName: string): FilesystemContract;
   withQuota(diskName: string, quotaStore: QuotaStore, opts: QuotaOptions): FilesystemContract;
+
+  // v0.1.0 factory methods
+  withVersioning(diskName: string): FilesystemContract;
+  withRouting(routes: StorageRoute[], defaultDisk: FilesystemContract): FilesystemContract;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  serveRange(path: string, req: any, res: any, diskName?: string): Promise<void>;
 
   // Proxy methods to default disk
   exists(path: string): Promise<boolean>;

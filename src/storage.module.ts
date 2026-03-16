@@ -9,6 +9,9 @@ import { StorageService } from './storage.service';
 import { StorageEventsService } from './events/storage-events.service';
 import { StorageAuditService } from './audit/storage-audit.service';
 import { StorageTempCleanupService } from './temp/storage-temp.service';
+import { StorageMigrator } from './migration/storage-migrator';
+import { StorageUploadProgressService } from './progress/storage-upload-progress.service';
+import { StorageArchiver } from './archiver/storage-archiver';
 
 @Global()
 @Module({})
@@ -28,6 +31,9 @@ export class StorageModule {
         StorageService,
         StorageEventsService,
         StorageTempCleanupService,
+        StorageMigrator,
+        StorageUploadProgressService,
+        StorageArchiver,
         ...auditProviders,
         ...diskProviders,
       ],
@@ -35,6 +41,9 @@ export class StorageModule {
         StorageService,
         StorageEventsService,
         StorageTempCleanupService,
+        StorageMigrator,
+        StorageUploadProgressService,
+        StorageArchiver,
         ...auditProviders,
         ...diskProviders.map((p) => p.provide),
       ],
@@ -56,6 +65,9 @@ export class StorageModule {
         StorageService,
         StorageEventsService,
         StorageTempCleanupService,
+        StorageMigrator,
+        StorageUploadProgressService,
+        StorageArchiver,
         ...auditProviders,
         ...diskProviders,
       ],
@@ -63,6 +75,9 @@ export class StorageModule {
         StorageService,
         StorageEventsService,
         StorageTempCleanupService,
+        StorageMigrator,
+        StorageUploadProgressService,
+        StorageArchiver,
         ...auditProviders,
         ...diskProviders.map((p) => p.provide),
       ],

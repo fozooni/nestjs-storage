@@ -17,3 +17,6 @@ export { ReplicatedDisk } from './replicated-disk';
 export { CdnDisk } from './cdn-disk';
 export { OtelDisk } from './otel-disk';
 export { QuotaDisk, MemoryQuotaStore } from './quota-disk';
+// v0.1.0 decorators
+export { VersionedDisk } from './versioned-disk';
+export { RouterDisk, byExtension, byPrefix, byMimeType, bySize, custom } from './router-disk';

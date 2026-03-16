@@ -18,6 +18,8 @@ import { ReplicatedDisk } from './disk/replicated-disk';
 import { CdnDisk } from './disk/cdn-disk';
 import { OtelDisk } from './disk/otel-disk';
 import { QuotaDisk } from './disk/quota-disk';
+import { VersionedDisk } from './disk/versioned-disk';
+import { RouterDisk } from './disk/router-disk';
 import { DiskConfigValidator } from './config/disk-config-validator';
 import { StorageEventsService } from './events/storage-events.service';
 import { StorageEvents } from './events/storage-events.constants';
@@ -43,6 +45,7 @@ import type {
   RetryOptions,
   StorageConfig,
   StorageManager,
+  StorageRoute,
   StreamableFileOptions,
   TemporaryUrlOptions,
 } from './interfaces/storage.interface';
@@ -568,6 +571,106 @@ export class StorageService implements StorageManager {
    */
   withQuota(diskName: string, quotaStore: QuotaStore, opts: QuotaOptions): FilesystemContract {
     return new QuotaDisk(this.disk(diskName), quotaStore, opts);
+  }
+
+  // ─── v0.1.0 Factory methods ────────────────────────────────────────────────
+
+  /**
+   * Wrap a disk with transparent file versioning.
+   * Every `put()` call snapshots the previous content before overwriting.
+   *
+   * @param diskName  The configured disk to wrap.
+   */
+  withVersioning(diskName: string): FilesystemContract {
+    return new VersionedDisk(this.disk(diskName));
+  }
+
+  /**
+   * Create a `RouterDisk` that dispatches reads and writes to different disks
+   * based on the supplied routing rules.
+   *
+   * @param routes       Ordered list of routing rules (first match wins on write).
+   * @param defaultDisk  Disk used when no rule matches.
+   */
+  withRouting(routes: StorageRoute[], defaultDisk: FilesystemContract): FilesystemContract {
+    return new RouterDisk(defaultDisk, routes);
+  }
+
+  /**
+   * Serve a file as an HTTP partial-content (206) response, or a full 200
+   * response when no `Range` header is present.
+   *
+   * @param path      Path of the file to serve.
+   * @param req       Express / Fastify-compatible request object.
+   * @param res       Express / Fastify-compatible response object.
+   * @param diskName  Optional disk name (defaults to the configured default disk).
+   */
+  async serveRange(
+    path: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    req: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    res: any,
+    diskName?: string,
+  ): Promise<void> {
+    const disk = this.disk(diskName);
+    const rangeHeader: string | undefined = req.headers?.range;
+
+    if (!rangeHeader || !disk.getRange) {
+      // No Range header (or disk doesn't support ranges) — serve full file.
+      const [stream, mime, fileSize] = await Promise.all([
+        disk.get(path, { responseType: 'stream' }),
+        disk.mimeType(path),
+        disk.size(path),
+      ]);
+      res.set?.({
+        'Content-Type': mime,
+        'Content-Length': fileSize,
+        'Accept-Ranges': 'bytes',
+      });
+      res.status?.(200);
+      (stream as NodeJS.ReadableStream).pipe(res);
+      return;
+    }
+
+    // Parse "bytes=start-end" or "bytes=start-" or "bytes=-suffix"
+    const totalSize = await disk.size(path);
+    const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
+    if (!match) {
+      res.status?.(416); // Range Not Satisfiable
+      res.end?.();
+      return;
+    }
+
+    let start: number;
+    let end: number;
+
+    if (!match[1] && match[2]) {
+      // suffix range: bytes=-N  (last N bytes)
+      const suffixLen = parseInt(match[2], 10);
+      start = Math.max(0, totalSize - suffixLen);
+      end = totalSize - 1;
+    } else {
+      start = parseInt(match[1], 10);
+      end = match[2] ? parseInt(match[2], 10) : totalSize - 1;
+    }
+
+    if (start > end || end >= totalSize) {
+      res.status?.(416);
+      res.end?.();
+      return;
+    }
+
+    const { stream, size, contentRange } = await disk.getRange(path, { start, end });
+
+    res.set?.({
+      'Content-Type': await disk.mimeType(path),
+      'Content-Length': size,
+      'Content-Range': contentRange,
+      'Accept-Ranges': 'bytes',
+    });
+    res.status?.(206);
+    (stream as NodeJS.ReadableStream).pipe(res);
   }
 
   // ─── Streamable file for NestJS controllers ────────────────────────────────

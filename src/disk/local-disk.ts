@@ -6,6 +6,7 @@ import { pipeline } from 'stream/promises';
 
 import {
   ChecksumAlgorithm,
+  ConditionalWriteResult,
   CopyOptions,
   DeleteManyResult,
   DiskConfig,
@@ -17,6 +18,8 @@ import {
   MultipartUploadOptions,
   MultipartUploadPart,
   PutOptions,
+  RangeOptions,
+  RangeResult,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 import { StorageConfigurationError, StorageFileNotFoundError } from '../errors/storage-errors';
@@ -549,6 +552,55 @@ export class LocalDisk implements FilesystemContract {
     }
 
     return { succeeded, failed };
+  }
+
+  // ─── Range requests (HTTP 206 partial content) ────────────────────────────
+
+  async getRange(path: string, options: RangeOptions): Promise<RangeResult> {
+    const fullPath = this.resolvePath(path);
+    const stats = await fs.stat(fullPath);
+    const totalSize = stats.size;
+    const start = options.start;
+    const end = options.end !== undefined ? options.end : totalSize - 1;
+    const size = end - start + 1;
+    const stream = createReadStream(fullPath, { start, end });
+    return {
+      stream,
+      size,
+      contentRange: `bytes ${start}-${end}/${totalSize}`,
+      totalSize,
+    };
+  }
+
+  // ─── Concurrent write protection (optimistic locking) ────────────────────
+
+  async putIfMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    etag: string,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    try {
+      const currentEtag = await this.checksum(path, 'md5');
+      if (currentEtag !== etag) return { success: false };
+    } catch {
+      // File doesn't exist
+      return { success: false };
+    }
+    await this.put(path, content, opts);
+    const newEtag = await this.checksum(path, 'md5');
+    return { success: true, etag: newEtag };
+  }
+
+  async putIfNoneMatch(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    opts?: PutOptions,
+  ): Promise<ConditionalWriteResult> {
+    if (await this.exists(path)) return { success: false };
+    await this.put(path, content, opts);
+    const newEtag = await this.checksum(path, 'md5');
+    return { success: true, etag: newEtag };
   }
 
   // Multipart upload support via temp directory concatenation
