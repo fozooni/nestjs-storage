@@ -67,7 +67,9 @@ describe('MinioDisk', () => {
   describe('url()', () => {
     it('should return path-style URL: endpoint/bucket/key', () => {
       const disk = new MinioDisk(baseConfig);
-      expect(disk.url('uploads/photo.jpg')).toBe('http://localhost:9000/my-bucket/uploads/photo.jpg');
+      expect(disk.url('uploads/photo.jpg')).toBe(
+        'http://localhost:9000/my-bucket/uploads/photo.jpg',
+      );
     });
 
     it('should strip trailing slash from endpoint', () => {
@@ -87,7 +89,9 @@ describe('MinioDisk', () => {
 
     it('should strip leading slashes and compose path-style URL', () => {
       const disk = new MinioDisk(baseConfig);
-      expect(disk.url('/sub/dir/file.txt')).toBe('http://localhost:9000/my-bucket/sub/dir/file.txt');
+      expect(disk.url('/sub/dir/file.txt')).toBe(
+        'http://localhost:9000/my-bucket/sub/dir/file.txt',
+      );
     });
   });
 });

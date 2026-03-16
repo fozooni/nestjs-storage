@@ -56,7 +56,11 @@ function mapAzureError(error: unknown, diskName: string, path?: string): never {
   const cause = error instanceof Error ? error : undefined;
   const msg = err?.message ?? 'Unknown Azure error';
 
-  if (err?.statusCode === 404 || err?.code === 'BlobNotFound' || err?.code === 'ContainerNotFound') {
+  if (
+    err?.statusCode === 404 ||
+    err?.code === 'BlobNotFound' ||
+    err?.code === 'ContainerNotFound'
+  ) {
     throw new StorageFileNotFoundError(msg, diskName, path, cause);
   }
   if (err?.statusCode === 403 || err?.statusCode === 401) {
@@ -188,9 +192,7 @@ export class AzureDisk implements FilesystemContract {
       };
 
       const metadata = options?.metadata
-        ? Object.fromEntries(
-            Object.entries(options.metadata).map(([k, v]) => [k, String(v)]),
-          )
+        ? Object.fromEntries(Object.entries(options.metadata).map(([k, v]) => [k, String(v)]))
         : undefined;
 
       await blockBlobClient.upload(buffer, buffer.length, {
@@ -235,7 +237,12 @@ export class AzureDisk implements FilesystemContract {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async putFileAs(path: string, file: any, name: string, options?: PutOptions): Promise<string | false> {
+  async putFileAs(
+    path: string,
+    file: any,
+    name: string,
+    options?: PutOptions,
+  ): Promise<string | false> {
     let contents: Buffer | NodeJS.ReadableStream;
 
     if (Buffer.isBuffer(file)) {
@@ -540,7 +547,9 @@ export class AzureDisk implements FilesystemContract {
   ): Promise<MultipartUploadPart> {
     const key = sanitizePath(path);
     // Block IDs must be the same length; base64-encode zero-padded part numbers
-    const blockId = Buffer.from(`${uploadId}-${String(partNumber).padStart(8, '0')}`).toString('base64');
+    const blockId = Buffer.from(`${uploadId}-${String(partNumber).padStart(8, '0')}`).toString(
+      'base64',
+    );
 
     let buffer: Buffer;
     if (Buffer.isBuffer(data)) {
@@ -588,7 +597,11 @@ export class AzureDisk implements FilesystemContract {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async putFileMultipart(path: string, file: any, options?: MultipartUploadOptions): Promise<string | false> {
+  async putFileMultipart(
+    path: string,
+    file: any,
+    options?: MultipartUploadOptions,
+  ): Promise<string | false> {
     try {
       let contents: Buffer;
       let filename: string;
@@ -686,7 +699,9 @@ export class AzureDisk implements FilesystemContract {
       url: uploadUrl,
       fields: {
         'x-ms-blob-type': 'BlockBlob',
-        ...(options?.allowedMimeTypes?.length ? { 'Content-Type': options.allowedMimeTypes[0] } : {}),
+        ...(options?.allowedMimeTypes?.length
+          ? { 'Content-Type': options.allowedMimeTypes[0] }
+          : {}),
       },
     };
   }

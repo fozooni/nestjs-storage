@@ -29,7 +29,9 @@ describe('StorageAuditService', () => {
 
   describe('default logger sink', () => {
     it('should call logger.log() for successful operations', () => {
-      const logSpy = jest.spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log').mockImplementation();
+      const logSpy = jest
+        .spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log')
+        .mockImplementation();
       service.log(successEntry);
       expect(logSpy).toHaveBeenCalled();
       const msg: string = logSpy.mock.calls[0][0] as string;
@@ -40,7 +42,9 @@ describe('StorageAuditService', () => {
     });
 
     it('should call logger.warn() for failed operations', () => {
-      const warnSpy = jest.spyOn((service as unknown as { logger: { warn: jest.Mock } }).logger, 'warn').mockImplementation();
+      const warnSpy = jest
+        .spyOn((service as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+        .mockImplementation();
       service.log(failureEntry);
       expect(warnSpy).toHaveBeenCalled();
       const msg: string = warnSpy.mock.calls[0][0] as string;
@@ -50,14 +54,18 @@ describe('StorageAuditService', () => {
     });
 
     it('should include userId in log when present', () => {
-      const logSpy = jest.spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log').mockImplementation();
+      const logSpy = jest
+        .spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log')
+        .mockImplementation();
       service.log({ ...successEntry, userId: 'user-123' });
       expect(logSpy.mock.calls[0][0]).toContain('user=user-123');
       logSpy.mockRestore();
     });
 
     it('should include ip in log when present', () => {
-      const logSpy = jest.spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log').mockImplementation();
+      const logSpy = jest
+        .spyOn((service as unknown as { logger: { log: jest.Mock } }).logger, 'log')
+        .mockImplementation();
       service.log({ ...successEntry, ip: '192.168.1.1' });
       expect(logSpy.mock.calls[0][0]).toContain('ip=192.168.1.1');
       logSpy.mockRestore();

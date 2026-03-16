@@ -19,10 +19,7 @@ import {
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
-import {
-  StorageConfigurationError,
-  StorageFileNotFoundError,
-} from '../errors/storage-errors';
+import { StorageConfigurationError, StorageFileNotFoundError } from '../errors/storage-errors';
 import { ScopedDisk } from './scoped-disk';
 import {
   encodeS3Key,

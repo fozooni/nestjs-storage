@@ -29,7 +29,12 @@ export class StorageModule {
         ...auditProviders,
         ...diskProviders,
       ],
-      exports: [StorageService, StorageEventsService, ...auditProviders, ...diskProviders.map((p) => p.provide)],
+      exports: [
+        StorageService,
+        StorageEventsService,
+        ...auditProviders,
+        ...diskProviders.map((p) => p.provide),
+      ],
     };
   }
 
@@ -43,8 +48,19 @@ export class StorageModule {
     return {
       module: StorageModule,
       imports: options.imports || [],
-      providers: [...asyncProviders, StorageService, StorageEventsService, ...auditProviders, ...diskProviders],
-      exports: [StorageService, StorageEventsService, ...auditProviders, ...diskProviders.map((p) => p.provide)],
+      providers: [
+        ...asyncProviders,
+        StorageService,
+        StorageEventsService,
+        ...auditProviders,
+        ...diskProviders,
+      ],
+      exports: [
+        StorageService,
+        StorageEventsService,
+        ...auditProviders,
+        ...diskProviders.map((p) => p.provide),
+      ],
     };
   }
 

@@ -51,10 +51,7 @@ export class LocalSignedUrlMiddleware implements NestMiddleware {
       const expectedBuf = Buffer.from(expected, 'hex');
       const providedBuf = Buffer.from(signature, 'hex');
 
-      if (
-        expectedBuf.length !== providedBuf.length ||
-        !timingSafeEqual(expectedBuf, providedBuf)
-      ) {
+      if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
         res.status(403).json({ message: 'Invalid signature' });
         return;
       }

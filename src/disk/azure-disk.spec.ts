@@ -106,9 +106,9 @@ describe('AzureDisk', () => {
     });
 
     it('should throw StorageConfigurationError when accountName is missing', () => {
-      expect(
-        () => new AzureDisk({ driver: 'azure', accountKey: 'k', containerName: 'c' }),
-      ).toThrow(StorageConfigurationError);
+      expect(() => new AzureDisk({ driver: 'azure', accountKey: 'k', containerName: 'c' })).toThrow(
+        StorageConfigurationError,
+      );
     });
 
     it('should throw StorageConfigurationError when both accountKey and sasToken are missing', () => {
@@ -118,9 +118,9 @@ describe('AzureDisk', () => {
     });
 
     it('should throw StorageConfigurationError when containerName/bucket are missing', () => {
-      expect(
-        () => new AzureDisk({ driver: 'azure', accountName: 'a', accountKey: 'k' }),
-      ).toThrow(StorageConfigurationError);
+      expect(() => new AzureDisk({ driver: 'azure', accountName: 'a', accountKey: 'k' })).toThrow(
+        StorageConfigurationError,
+      );
     });
 
     it('should fall back to config.bucket when containerName is absent', () => {
@@ -354,9 +354,7 @@ describe('AzureDisk', () => {
 
   describe('deleteDirectory()', () => {
     it('should delete all blobs with the directory prefix', async () => {
-      mockListBlobsFlat.mockReturnValue(
-        asyncItems([{ name: 'dir/a.txt' }, { name: 'dir/b.txt' }]),
-      );
+      mockListBlobsFlat.mockReturnValue(asyncItems([{ name: 'dir/a.txt' }, { name: 'dir/b.txt' }]));
       expect(await disk.deleteDirectory('dir')).toBe(true);
       expect(mockDeleteIfExists).toHaveBeenCalledTimes(2);
     });
@@ -424,11 +422,7 @@ describe('AzureDisk', () => {
     it('should prepend to existing content', async () => {
       mockDownload.mockResolvedValue({ readableStreamBody: Readable.from(['world']) });
       await disk.prepend('file.txt', 'hello ');
-      expect(mockUpload).toHaveBeenCalledWith(
-        Buffer.from('hello world'),
-        11,
-        expect.anything(),
-      );
+      expect(mockUpload).toHaveBeenCalledWith(Buffer.from('hello world'), 11, expect.anything());
     });
 
     it('should create file if prepend target missing', async () => {

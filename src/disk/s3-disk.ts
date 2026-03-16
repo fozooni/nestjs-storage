@@ -21,10 +21,7 @@ import {
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
-import {
-  StorageConfigurationError,
-  StorageNetworkError,
-} from '../errors/storage-errors';
+import { StorageConfigurationError, StorageNetworkError } from '../errors/storage-errors';
 import {
   aclToVisibility,
   buildS3Url,

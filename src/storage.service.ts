@@ -160,7 +160,13 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
-    this.auditService?.log({ operation: 'put', disk: this.defaultDisk, path, timestamp: new Date(), success: result });
+    this.auditService?.log({
+      operation: 'put',
+      disk: this.defaultDisk,
+      path,
+      timestamp: new Date(),
+      success: result,
+    });
     return result;
   }
 
@@ -174,7 +180,13 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
-    this.auditService?.log({ operation: 'putFile', disk: this.defaultDisk, path, timestamp: new Date(), success: result !== false });
+    this.auditService?.log({
+      operation: 'putFile',
+      disk: this.defaultDisk,
+      path,
+      timestamp: new Date(),
+      success: result !== false,
+    });
     return result;
   }
 
@@ -196,7 +208,13 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
-    this.auditService?.log({ operation: 'delete', disk: this.defaultDisk, path, timestamp: new Date(), success: result });
+    this.auditService?.log({
+      operation: 'delete',
+      disk: this.defaultDisk,
+      path,
+      timestamp: new Date(),
+      success: result,
+    });
     return result;
   }
 
@@ -210,7 +228,13 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
-    this.auditService?.log({ operation: 'copy', disk: this.defaultDisk, path: from, timestamp: new Date(), success: result });
+    this.auditService?.log({
+      operation: 'copy',
+      disk: this.defaultDisk,
+      path: from,
+      timestamp: new Date(),
+      success: result,
+    });
     return result;
   }
 
@@ -224,7 +248,13 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
-    this.auditService?.log({ operation: 'move', disk: this.defaultDisk, path: from, timestamp: new Date(), success: result });
+    this.auditService?.log({
+      operation: 'move',
+      disk: this.defaultDisk,
+      path: from,
+      timestamp: new Date(),
+      success: result,
+    });
     return result;
   }
 
@@ -394,7 +424,12 @@ export class StorageService implements StorageManager {
       failed: result.failed,
       timestamp: new Date(),
     });
-    this.auditService?.log({ operation: 'deleteMany', disk: this.defaultDisk, timestamp: new Date(), success: result.failed.length === 0 });
+    this.auditService?.log({
+      operation: 'deleteMany',
+      disk: this.defaultDisk,
+      timestamp: new Date(),
+      success: result.failed.length === 0,
+    });
     return result;
   }
 

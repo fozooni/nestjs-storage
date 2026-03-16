@@ -268,9 +268,7 @@ describe('LocalDisk', () => {
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
       const url = await disk.temporaryUrl('file.txt', 3600);
       expect(url).toBe('/file.txt');
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('signSecret'),
-      );
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('signSecret'));
       consoleSpy.mockRestore();
     });
 
