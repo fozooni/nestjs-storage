@@ -61,21 +61,21 @@ export class StorageHealthIndicator {
     diskNames: string[],
     options?: StorageHealthCheckOptions,
   ): Promise<HealthIndicatorResult> {
-    const results = await Promise.all(
-      diskNames.map(async (diskName) => {
-        try {
-          const result = await this.check(`${key}_${diskName}`, diskName, options);
-          const diskResult = result[`${key}_${diskName}`];
-          return { diskName, status: diskResult.status, message: diskResult.message };
-        } catch (error) {
-          return {
-            diskName,
-            status: 'down' as const,
-            message: error instanceof Error ? error.message : 'Unknown error',
-          };
-        }
-      }),
-    );
+    const results: Array<{ diskName: string; status: string; message?: string }> = [];
+
+    for (const diskName of diskNames) {
+      try {
+        const result = await this.check(`${key}_${diskName}`, diskName, options);
+        const diskResult = result[`${key}_${diskName}`];
+        results.push({ diskName, status: diskResult.status, message: diskResult.message });
+      } catch (error) {
+        results.push({
+          diskName,
+          status: 'down' as const,
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
 
     const allHealthy = results.every((r) => r.status === 'up');
     const diskStatuses: Record<string, string> = {};
