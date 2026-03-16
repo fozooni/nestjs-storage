@@ -14,9 +14,15 @@ import {
   MultipartUploadInit,
   MultipartUploadOptions,
   MultipartUploadPart,
+  PresignedPostData,
+  PresignedPostOptions,
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
+import {
+  StorageConfigurationError,
+  StorageNetworkError,
+} from '../errors/storage-errors';
 import {
   getContentType,
   getFilename,
@@ -43,7 +49,7 @@ export class GcsDisk implements FilesystemContract {
 
   private validateConfig(): void {
     if (!this.config.bucket) {
-      throw new Error('GCS configuration requires bucket');
+      throw new StorageConfigurationError('GCS configuration requires bucket', 'gcs');
     }
   }
 
@@ -61,7 +67,7 @@ export class GcsDisk implements FilesystemContract {
     const response = await this.client.getObject(key);
 
     if (!response.body) {
-      throw new Error('No body returned from GCS');
+      throw new StorageNetworkError('No body returned from GCS', this.config.driver, key);
     }
 
     const responseType = options?.responseType || 'buffer';
@@ -112,7 +118,12 @@ export class GcsDisk implements FilesystemContract {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (this.config.throw !== false) {
-        throw new Error(`GCS upload failed for key "${key}": ${error.message}`);
+        throw new StorageNetworkError(
+          `GCS upload failed for key "${key}": ${error.message}`,
+          this.config.driver,
+          key,
+          error instanceof Error ? error : undefined,
+        );
       }
       return false;
     }
@@ -645,6 +656,44 @@ export class GcsDisk implements FilesystemContract {
       }
       return false;
     }
+  }
+
+  /**
+   * Generate a presigned POST policy for direct browser-to-GCS uploads.
+   * Requires the `@google-cloud/storage` peer and a service account with signing permissions.
+   */
+  async presignedPost(path: string, options?: PresignedPostOptions): Promise<PresignedPostData> {
+    const key = sanitizePath(path);
+    const rawBucket = this.client.getRawBucket();
+
+    if (!rawBucket?.file) {
+      throw new StorageConfigurationError(
+        'presignedPost() requires @google-cloud/storage with signing credentials',
+        this.config.driver,
+        path,
+      );
+    }
+
+    const file = rawBucket.file(key);
+    const expiresAt = new Date(Date.now() + (options?.expires ?? 3600) * 1000);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conditions: any[] = [];
+    if (options?.maxSize) {
+      conditions.push(['content-length-range', 0, options.maxSize]);
+    }
+
+    const [response] = await file.generateSignedPostPolicyV4({
+      expires: expiresAt,
+      conditions,
+    });
+
+    return {
+      url: response.url,
+      fields: Object.fromEntries(
+        (response.fields as { name: string; value: string }[]).map((f) => [f.name, f.value]),
+      ),
+    };
   }
 
   getBucket(): string {

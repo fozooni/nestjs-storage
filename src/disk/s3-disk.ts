@@ -16,9 +16,15 @@ import {
   MultipartUploadInit,
   MultipartUploadOptions,
   MultipartUploadPart,
+  PresignedPostData,
+  PresignedPostOptions,
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
+import {
+  StorageConfigurationError,
+  StorageNetworkError,
+} from '../errors/storage-errors';
 import {
   aclToVisibility,
   buildS3Url,
@@ -50,9 +56,9 @@ export class S3Disk implements FilesystemContract {
     const missing = required.filter((key) => !this.config[key as keyof DiskConfig]);
 
     if (missing.length > 0) {
-      throw new Error(
-        `S3 configuration missing required fields: ${missing.join(', ')}. ` +
-          `Current config: ${JSON.stringify(this.config, null, 2)}`,
+      throw new StorageConfigurationError(
+        `S3 configuration missing required fields: ${missing.join(', ')}`,
+        this.config.driver,
       );
     }
   }
@@ -75,7 +81,7 @@ export class S3Disk implements FilesystemContract {
     const response = await this.client.getObject(key);
 
     if (!response.body) {
-      throw new Error('No body returned from S3');
+      throw new StorageNetworkError('No body returned from S3', this.config.driver, key);
     }
 
     const responseType = options?.responseType || 'buffer';
@@ -132,8 +138,11 @@ export class S3Disk implements FilesystemContract {
       const statusCode = error?.$metadata?.httpStatusCode || 'Unknown';
 
       if (this.config.throw !== false) {
-        throw new Error(
+        throw new StorageNetworkError(
           `S3 upload failed for key "${key}": ${errorCode} - ${errorMessage} (HTTP ${statusCode})`,
+          this.config.driver,
+          key,
+          error instanceof Error ? error : undefined,
         );
       }
       return false;
@@ -685,6 +694,48 @@ export class S3Disk implements FilesystemContract {
       }
       return false;
     }
+  }
+
+  /**
+   * Generate a presigned POST policy for direct browser-to-S3 uploads.
+   * Requires the optional peer `@aws-sdk/s3-presigned-post`.
+   */
+  async presignedPost(path: string, options?: PresignedPostOptions): Promise<PresignedPostData> {
+    let createPresignedPost: (
+      ...args: unknown[]
+    ) => Promise<{ url: string; fields: Record<string, string> }>;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      ({ createPresignedPost } = require('@aws-sdk/s3-presigned-post'));
+    } catch {
+      throw new StorageConfigurationError(
+        'Install @aws-sdk/s3-presigned-post to use presignedPost(): npm install @aws-sdk/s3-presigned-post',
+        this.config.driver,
+        path,
+      );
+    }
+
+    const key = sanitizePath(path);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conditions: any[] = [];
+
+    if (options?.maxSize) {
+      conditions.push(['content-length-range', 0, options.maxSize]);
+    }
+    if (options?.allowedMimeTypes?.length) {
+      for (const mimeType of options.allowedMimeTypes) {
+        conditions.push(['starts-with', '$Content-Type', mimeType]);
+      }
+    }
+
+    const result = await createPresignedPost(this.client.getRawClient(), {
+      Bucket: this.config.bucket!,
+      Key: key,
+      Conditions: conditions,
+      Expires: options?.expires ?? 3600,
+    });
+
+    return { url: result.url, fields: result.fields };
   }
 
   /**

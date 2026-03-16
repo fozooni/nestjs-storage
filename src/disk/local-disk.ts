@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'crypto';
+import { createHash, createHmac, randomUUID } from 'crypto';
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import { dirname, join, relative, resolve } from 'path';
 import { Readable } from 'stream';
@@ -19,6 +19,10 @@ import {
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
+import {
+  StorageConfigurationError,
+  StorageFileNotFoundError,
+} from '../errors/storage-errors';
 import { ScopedDisk } from './scoped-disk';
 import {
   encodeS3Key,
@@ -35,7 +39,7 @@ export class LocalDisk implements FilesystemContract {
 
   constructor(config: DiskConfig) {
     if (!config.root) {
-      throw new Error('Local disk root path is required');
+      throw new StorageConfigurationError('Local disk root path is required', 'local');
     }
 
     this.config = config;
@@ -51,7 +55,7 @@ export class LocalDisk implements FilesystemContract {
 
     // Ensure path is within root
     if (!resolvedPath.startsWith(this.root)) {
-      throw new Error('Path traversal detected');
+      throw new StorageFileNotFoundError('Path traversal detected', 'local', path);
     }
 
     return resolvedPath;
@@ -369,13 +373,29 @@ export class LocalDisk implements FilesystemContract {
 
   async temporaryUrl(
     path: string,
-    _expiration: Date | number,
+    expiration: Date | number,
     _options?: TemporaryUrlOptions,
   ): Promise<string> {
-    // Local disk doesn't support signed URLs
-    // Return regular URL with a warning
-    console.warn('Local disk does not support temporary URLs');
-    return this.url(path);
+    if (!this.config.signSecret) {
+      // Legacy behaviour: warn and return plain URL
+      console.warn(
+        'LocalDisk.temporaryUrl: set DiskConfig.signSecret to enable HMAC-signed URLs. ' +
+          'Returning an unsigned URL.',
+      );
+      return this.url(path);
+    }
+
+    const expiresAt =
+      expiration instanceof Date
+        ? Math.floor(expiration.getTime() / 1000)
+        : Math.floor(Date.now() / 1000) + expiration;
+
+    const normalizedPath = path.startsWith('/') ? path.slice(1) : path;
+    const payload = `${normalizedPath}:${expiresAt}`;
+    const signature = createHmac('sha256', this.config.signSecret).update(payload).digest('hex');
+
+    const baseUrl = this.config.url ?? '';
+    return `${baseUrl}/${encodeS3Key(normalizedPath)}?expires=${expiresAt}&signature=${signature}`;
   }
 
   async prepend(path: string, data: string): Promise<boolean> {

@@ -268,4 +268,9 @@ export class GcsClientWrapper {
   getBucket(): string {
     return this.bucketName;
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getRawBucket(): any {
+    return this.bucket;
+  }
 }

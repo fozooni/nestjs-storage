@@ -10,6 +10,9 @@ export { STORAGE_MODULE_OPTIONS, getStorageDiskToken } from './constants';
 // Interfaces & Types
 export * from './interfaces';
 
+// Errors
+export * from './errors';
+
 // Decorators
 export * from './decorators';
 
@@ -39,3 +42,9 @@ export * from './naming';
 
 // Interceptors
 export * from './interceptors';
+
+// Audit
+export * from './audit';
+
+// Middleware
+export * from './middleware';

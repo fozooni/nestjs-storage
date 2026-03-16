@@ -7,6 +7,7 @@ import {
 } from './interfaces/storage-module-options.interface';
 import { StorageService } from './storage.service';
 import { StorageEventsService } from './events/storage-events.service';
+import { StorageAuditService } from './audit/storage-audit.service';
 
 @Global()
 @Module({})
@@ -14,6 +15,7 @@ export class StorageModule {
   static forRoot(options: StorageModuleOptions): DynamicModule {
     const diskNames = Object.keys(options.disks || {});
     const diskProviders = this.createDiskProviders(diskNames);
+    const auditProviders = options.auditLog ? [StorageAuditService] : [];
 
     return {
       module: StorageModule,
@@ -24,9 +26,10 @@ export class StorageModule {
         },
         StorageService,
         StorageEventsService,
+        ...auditProviders,
         ...diskProviders,
       ],
-      exports: [StorageService, StorageEventsService, ...diskProviders.map((p) => p.provide)],
+      exports: [StorageService, StorageEventsService, ...auditProviders, ...diskProviders.map((p) => p.provide)],
     };
   }
 
@@ -34,11 +37,14 @@ export class StorageModule {
     const asyncProviders = this.createAsyncProviders(options);
     const diskProviders = this.createDiskProviders(options.injectDisks || []);
 
+    // For async, always register StorageAuditService (it will only be injected if auditLog:true is in config)
+    const auditProviders: Provider[] = [StorageAuditService];
+
     return {
       module: StorageModule,
       imports: options.imports || [],
-      providers: [...asyncProviders, StorageService, StorageEventsService, ...diskProviders],
-      exports: [StorageService, StorageEventsService, ...diskProviders.map((p) => p.provide)],
+      providers: [...asyncProviders, StorageService, StorageEventsService, ...auditProviders, ...diskProviders],
+      exports: [StorageService, StorageEventsService, ...auditProviders, ...diskProviders.map((p) => p.provide)],
     };
   }
 

@@ -4,7 +4,17 @@ export interface NamingStrategy {
 }
 
 export interface DiskConfig {
-  driver: 'local' | 's3' | 'gcs' | 'r2' | (string & {});
+  driver:
+    | 'local'
+    | 's3'
+    | 'gcs'
+    | 'r2'
+    | 'minio'
+    | 'b2'
+    | 'digitalocean'
+    | 'wasabi'
+    | 'azure'
+    | (string & {});
   root?: string;
   url?: string;
   throw?: boolean;
@@ -26,6 +36,15 @@ export interface DiskConfig {
   projectId?: string;
   keyFilename?: string;
   credentials?: Record<string, any>;
+
+  // Azure Blob Storage
+  accountName?: string;
+  accountKey?: string;
+  sasToken?: string;
+  containerName?: string;
+
+  // LocalDisk HMAC signed URLs
+  signSecret?: string;
 
   // Naming strategy for file uploads
   namingStrategy?: NamingStrategy;
@@ -128,6 +147,22 @@ export interface MultipartUploadStatus {
 
 export type ChecksumAlgorithm = 'md5' | 'sha1' | 'sha256';
 
+export interface PresignedPostOptions {
+  /** URL expiry in seconds (default: 3600). */
+  expires?: number;
+  /** Maximum allowed file size in bytes. */
+  maxSize?: number;
+  /** Allowed MIME types (e.g. `['image/jpeg', 'image/png']`). */
+  allowedMimeTypes?: string[];
+}
+
+export interface PresignedPostData {
+  /** The form action URL the browser should POST to. */
+  url: string;
+  /** Hidden form fields that must be included in the multipart POST. */
+  fields: Record<string, string>;
+}
+
 export interface DeleteManyResult {
   succeeded: string[];
   failed: string[];
@@ -216,6 +251,9 @@ export interface FilesystemContract {
   // Storage configuration
   getBucket?(): string | undefined;
 
+  // Direct browser-to-cloud upload (presigned POST)
+  presignedPost?(path: string, options?: PresignedPostOptions): Promise<PresignedPostData>;
+
   // Scoped disk
   scope?(prefix: string): FilesystemContract;
 }
@@ -296,4 +334,6 @@ export interface StorageConfig {
   disks: {
     [key: string]: DiskConfig;
   };
+  /** Enable audit logging for all storage operations. Default: false. */
+  auditLog?: boolean;
 }

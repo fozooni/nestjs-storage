@@ -6,6 +6,76 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.0.4] — 2026-03-16
+
+### Added
+
+#### New Drivers
+
+- **`AzureDisk`** — full `FilesystemContract` implementation for Azure Blob Storage via `@azure/storage-blob` (optional peer). Supports `accountKey` (SharedKey) and `sasToken` authentication. Multipart uploads via the Block Blob API (`stageBlock`/`commitBlockList`). Temporary URLs via `generateBlobSASQueryParameters`. Presigned POST via SAS URL. Driver key: `'azure'`.
+- **`MinioDisk`** — extends `S3Disk` with forced path-style URLs and required `endpoint`. Driver key: `'minio'`.
+- **`BackblazeDisk`** — extends `S3Disk` via B2's S3-compatible endpoint; URL uses B2 CDN pattern. Driver key: `'b2'`.
+- **`DigitalOceanDisk`** — extends `S3Disk` with Spaces endpoint and virtual-hosted-style URL. Driver key: `'digitalocean'`.
+- **`WasabiDisk`** — extends `S3Disk` with Wasabi endpoint. Driver key: `'wasabi'`.
+
+#### Typed Error Hierarchy
+
+- `StorageError` — base class for all storage errors; carries `disk?`, `path?`, `cause?` fields
+- `StorageFileNotFoundError` — thrown for HTTP 404 / missing file
+- `StoragePermissionError` — thrown for HTTP 403, unsupported operations (e.g. R2 ACLs)
+- `StorageNetworkError` — thrown for transient network or 5xx errors; safe to retry
+- `StorageConfigurationError` — thrown for missing required config or missing optional peer dep
+- `StorageQuotaExceededError` — reserved for quota-exceeded scenarios
+- All drivers updated to throw typed errors instead of bare `new Error()`
+
+#### EncryptedDisk
+
+- `EncryptedDisk` — decorator implementing `FilesystemContract` that transparently encrypts every write and decrypts every read using **AES-256-GCM** (key: 32 bytes, IV: 12 bytes per blob)
+- `StorageService.encrypted(diskName, { key })` factory — key accepted as hex string or `Buffer`
+- `size()` reports plaintext byte count (ciphertext overhead stripped)
+- `copy()` decrypts then re-encrypts at the destination
+- `presignedPost()` throws `StoragePermissionError` by design (direct uploads bypass encryption)
+
+#### Presigned POST
+
+- New optional `presignedPost?(path, options?): Promise<PresignedPostData>` on `FilesystemContract`
+- New types: `PresignedPostOptions { expires?, maxSize?, allowedMimeTypes? }` and `PresignedPostData { url, fields }`
+- `S3Disk.presignedPost` — uses `@aws-sdk/s3-presigned-post` (new optional peer)
+- `R2Disk` inherits `presignedPost` from `S3Disk`
+- `GcsDisk.presignedPost` — uses `file.generateSignedPostPolicyV4`
+- `AzureDisk.presignedPost` — generates a SAS-based PUT URL with required headers
+
+#### HMAC Signed URLs for LocalDisk
+
+- `DiskConfig.signSecret?: string` — 32+ character signing secret for LocalDisk
+- `LocalDisk.temporaryUrl()` now generates real HMAC-SHA256 signed URLs when `signSecret` is set: `{baseUrl}/{path}?expires={unix_ts}&signature={hex}`
+- `LocalSignedUrlMiddleware` — NestJS `NestMiddleware` that validates signed URLs using `crypto.timingSafeEqual`; returns 403 on expired or invalid signature
+
+#### Audit Logging
+
+- `StorageAuditService` — `@Injectable()` service with a default NestJS Logger sink
+- `AuditSink` interface — `{ log(entry: AuditEntry): void }` — implement to write to any backend
+- `AuditEntry` type — `{ operation, disk, path?, userId?, ip?, timestamp, success, error? }`
+- `StorageAuditService.addSink(sink)` — register additional sinks at runtime; sink errors are swallowed to avoid disrupting storage operations
+- `auditLog: true` in `StorageModule.forRoot()` options — enables audit logging
+- `StorageService` calls `auditService?.log(...)` after every mutating proxy method (`put`, `putFile`, `delete`, `copy`, `move`, `deleteMany`)
+
+### Changed
+
+- `DiskConfig.driver` union type extended to include `'minio' | 'b2' | 'digitalocean' | 'wasabi' | 'azure'`
+- `DiskConfig` extended with: `signSecret?` (LocalDisk HMAC), `accountName?`, `accountKey?`, `sasToken?`, `containerName?` (Azure)
+- `StorageConfig` extended with: `auditLog?: boolean`
+- `StorageService` registers 5 new drivers in constructor; adds `encrypted()` method; optionally injects `StorageAuditService` via `@Optional()`
+- `StorageModule.forRoot()` conditionally registers `StorageAuditService` when `auditLog: true`
+
+### Migration Notes
+
+- **Typed errors** — all drivers now throw `StorageError` subclasses. Replace any `catch (e)` blocks that match on `e.message` with `instanceof` checks. See [Upgrading from 0.0.3](README.md#upgrading-from-003).
+- **`LocalDisk.temporaryUrl()` warning message** — the warning text has changed from `'Local disk does not support temporary URLs'` to a message mentioning `signSecret`. Update any tests that assert the exact warning string.
+- No other breaking changes. All existing APIs, configurations, and custom drivers remain fully compatible.
+
+---
+
 ## [0.0.31] — 2026-03-16
 
 ### Fixed
@@ -172,6 +242,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+[0.0.4]: https://github.com/fozooni/nestjs-storage/compare/v0.0.31...v0.0.4
 [0.0.31]: https://github.com/fozooni/nestjs-storage/compare/v0.0.3...v0.0.31
 [0.0.3]: https://github.com/fozooni/nestjs-storage/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/fozooni/nestjs-storage/compare/v0.0.1...v0.0.2

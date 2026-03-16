@@ -1,4 +1,4 @@
-import { Inject, Injectable, StreamableFile } from '@nestjs/common';
+import { Inject, Injectable, Optional, StreamableFile } from '@nestjs/common';
 import { Readable } from 'stream';
 
 import { STORAGE_MODULE_OPTIONS } from './constants';
@@ -6,6 +6,12 @@ import { LocalDisk } from './disk/local-disk';
 import { S3Disk } from './disk/s3-disk';
 import { R2Disk } from './disk/r2-disk';
 import { GcsDisk } from './disk/gcs-disk';
+import { MinioDisk } from './disk/minio-disk';
+import { BackblazeDisk } from './disk/b2-disk';
+import { DigitalOceanDisk } from './disk/digitalocean-disk';
+import { WasabiDisk } from './disk/wasabi-disk';
+import { AzureDisk } from './disk/azure-disk';
+import { EncryptedDisk } from './disk/encrypted-disk';
 import { StorageEventsService } from './events/storage-events.service';
 import { StorageEvents } from './events/storage-events.constants';
 import { ScopedDisk } from './disk/scoped-disk';
@@ -27,6 +33,7 @@ import type {
   StreamableFileOptions,
   TemporaryUrlOptions,
 } from './interfaces/storage.interface';
+import { StorageAuditService } from './audit/storage-audit.service';
 import { getFilename } from './utils/storage.utils';
 
 @Injectable()
@@ -39,6 +46,7 @@ export class StorageService implements StorageManager {
   constructor(
     @Inject(STORAGE_MODULE_OPTIONS) config: StorageConfig,
     private readonly storageEvents: StorageEventsService,
+    @Optional() private readonly auditService?: StorageAuditService,
   ) {
     this.config = config;
     this.defaultDisk = config.default;
@@ -48,6 +56,11 @@ export class StorageService implements StorageManager {
     this.registerDriver('s3', (c) => new S3Disk(c));
     this.registerDriver('r2', (c) => new R2Disk(c));
     this.registerDriver('gcs', (c) => new GcsDisk(c));
+    this.registerDriver('minio', (c) => new MinioDisk(c));
+    this.registerDriver('b2', (c) => new BackblazeDisk(c));
+    this.registerDriver('digitalocean', (c) => new DigitalOceanDisk(c));
+    this.registerDriver('wasabi', (c) => new WasabiDisk(c));
+    this.registerDriver('azure', (c) => new AzureDisk(c));
   }
 
   get events(): StorageEventsService {
@@ -147,6 +160,7 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
+    this.auditService?.log({ operation: 'put', disk: this.defaultDisk, path, timestamp: new Date(), success: result });
     return result;
   }
 
@@ -160,6 +174,7 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
+    this.auditService?.log({ operation: 'putFile', disk: this.defaultDisk, path, timestamp: new Date(), success: result !== false });
     return result;
   }
 
@@ -181,6 +196,7 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
+    this.auditService?.log({ operation: 'delete', disk: this.defaultDisk, path, timestamp: new Date(), success: result });
     return result;
   }
 
@@ -194,6 +210,7 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
+    this.auditService?.log({ operation: 'copy', disk: this.defaultDisk, path: from, timestamp: new Date(), success: result });
     return result;
   }
 
@@ -207,6 +224,7 @@ export class StorageService implements StorageManager {
         timestamp: new Date(),
       });
     }
+    this.auditService?.log({ operation: 'move', disk: this.defaultDisk, path: from, timestamp: new Date(), success: result });
     return result;
   }
 
@@ -376,11 +394,31 @@ export class StorageService implements StorageManager {
       failed: result.failed,
       timestamp: new Date(),
     });
+    this.auditService?.log({ operation: 'deleteMany', disk: this.defaultDisk, timestamp: new Date(), success: result.failed.length === 0 });
     return result;
   }
 
   scope(prefix: string, diskName?: string): FilesystemContract {
     return new ScopedDisk(this.disk(diskName), prefix);
+  }
+
+  /**
+   * Wrap a disk with transparent AES-256-GCM encryption.
+   *
+   * @param diskName Name of the configured disk to wrap.
+   * @param options  `key` — 32-byte encryption key as a hex string or Buffer.
+   *
+   * @example
+   * ```ts
+   * const enc = storage.encrypted('local', { key: process.env.ENCRYPTION_KEY });
+   * await enc.put('secret.txt', 'sensitive data');
+   * ```
+   */
+  encrypted(diskName: string, options: { key: string | Buffer }): FilesystemContract {
+    const key = Buffer.isBuffer(options.key)
+      ? options.key
+      : Buffer.from(options.key as string, 'hex');
+    return new EncryptedDisk(this.disk(diskName), key);
   }
 
   // Streamable file for NestJS controllers

@@ -264,12 +264,56 @@ describe('LocalDisk', () => {
   });
 
   describe('temporaryUrl', () => {
-    it('should return regular URL with warning', async () => {
+    it('should return regular URL with warning when signSecret is not set', async () => {
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
       const url = await disk.temporaryUrl('file.txt', 3600);
       expect(url).toBe('/file.txt');
-      expect(consoleSpy).toHaveBeenCalledWith('Local disk does not support temporary URLs');
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('signSecret'),
+      );
       consoleSpy.mockRestore();
+    });
+
+    it('should generate HMAC-signed URL when signSecret is configured', async () => {
+      const signedDisk = new LocalDisk({
+        driver: 'local',
+        root: testRoot,
+        url: 'http://localhost:3000/files',
+        signSecret: 'my-signing-secret',
+      });
+      const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+      const url = await signedDisk.temporaryUrl('photo.jpg', 3600);
+      expect(url).toContain('?expires=');
+      expect(url).toContain('&signature=');
+      expect(url).toContain('photo.jpg');
+      // Expiry should be roughly now + 3600
+      const urlObj = new URL(url);
+      expect(Number(urlObj.searchParams.get('expires'))).toBeGreaterThanOrEqual(expiresAt - 2);
+    });
+
+    it('should generate different signatures for different paths', async () => {
+      const signedDisk = new LocalDisk({
+        driver: 'local',
+        root: testRoot,
+        signSecret: 'key',
+      });
+      const url1 = await signedDisk.temporaryUrl('a.txt', 3600);
+      const url2 = await signedDisk.temporaryUrl('b.txt', 3600);
+      const sig1 = new URL(url1, 'http://localhost').searchParams.get('signature');
+      const sig2 = new URL(url2, 'http://localhost').searchParams.get('signature');
+      expect(sig1).not.toBe(sig2);
+    });
+
+    it('should accept a Date expiration', async () => {
+      const signedDisk = new LocalDisk({
+        driver: 'local',
+        root: testRoot,
+        signSecret: 'key',
+      });
+      const expires = new Date(Date.now() + 7200000);
+      const url = await signedDisk.temporaryUrl('file.txt', expires);
+      expect(url).toContain('?expires=');
+      expect(url).toContain('&signature=');
     });
   });
 

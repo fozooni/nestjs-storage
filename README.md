@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dt/@fozooni/nestjs-storage.svg)](https://www.npmjs.com/package/@fozooni/nestjs-storage)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, and Google Cloud Storage.
+A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob Storage, MinIO, Backblaze B2, DigitalOcean Spaces, and Wasabi.
 
 ## Support
 
@@ -22,7 +22,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 ## Features
 
 - **Unified API** — One interface (`FilesystemContract`) for all storage backends
-- **4 Built-in Drivers** — Local, S3, R2 (Cloudflare), GCS (Google Cloud)
+- **9 Built-in Drivers** — Local, S3, R2 (Cloudflare), GCS (Google Cloud), Azure Blob Storage, MinIO, Backblaze B2, DigitalOcean Spaces, Wasabi
 - **NestJS Dynamic Module** — `forRoot()` and `forRootAsync()` registration
 - **Global Module** — Inject `StorageService` anywhere without importing
 - **`@InjectDisk()` Decorator** — Inject specific disks directly into your services
@@ -38,6 +38,11 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 - **File Validation Pipes** — `FileExtensionValidator` and `MagicBytesValidator` for `ParseFilePipe`
 - **Storage Events** — Typed event hooks after put/delete/copy/move operations
 - **Scoped Disks** — Path-prefixed disk instances for multi-tenancy (`storage.scope('users/123')`)
+- **EncryptedDisk** — Transparent AES-256-GCM encryption decorator wrapping any disk
+- **Presigned POST** — Direct browser-to-cloud uploads without proxying through NestJS
+- **HMAC Signed URLs** — Secure temporary URLs for LocalDisk via `LocalSignedUrlMiddleware`
+- **Typed Error Hierarchy** — `StorageError`, `StorageFileNotFoundError`, `StoragePermissionError`, and more
+- **Audit Logging** — Pluggable `AuditSink` interface to record every storage operation
 - **Dual CJS/ESM** — Ships both CommonJS and ES modules with TypeScript declarations
 - **Optional Peer Dependencies** — Only install the SDK you need
 
@@ -62,6 +67,11 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
     - [S3 Driver](#s3-driver)
     - [R2 Driver (Cloudflare)](#r2-driver-cloudflare)
     - [GCS Driver (Google Cloud)](#gcs-driver-google-cloud)
+    - [Azure Blob Storage Driver](#azure-blob-storage-driver)
+    - [MinIO Driver](#minio-driver)
+    - [Backblaze B2 Driver](#backblaze-b2-driver)
+    - [DigitalOcean Spaces Driver](#digitalocean-spaces-driver)
+    - [Wasabi Driver](#wasabi-driver)
   - [Usage](#usage)
     - [Injecting the Service](#injecting-the-service)
     - [Injecting a Specific Disk](#injecting-a-specific-disk)
@@ -81,6 +91,11 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
   - [File Validation Pipes](#file-validation-pipes)
   - [Storage Events](#storage-events)
   - [Scoped Disks](#scoped-disks)
+  - [EncryptedDisk](#encrypteddisk)
+  - [Presigned POST](#presigned-post)
+  - [HMAC Signed URLs for LocalDisk](#hmac-signed-urls-for-localdisk)
+  - [Typed Error Hierarchy](#typed-error-hierarchy)
+  - [Audit Logging](#audit-logging)
   - [Health Checks](#health-checks)
   - [Testing](#testing)
     - [Using FakeDisk](#using-fakedisk)
@@ -108,6 +123,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
     - [Utility Functions](#utility-functions)
   - [Upgrading from 0.0.1](#upgrading-from-001)
   - [Upgrading from 0.0.2](#upgrading-from-002)
+  - [Upgrading from 0.0.3](#upgrading-from-003)
   - [License](#license)
 
 ## Installation
@@ -128,11 +144,17 @@ yarn add @fozooni/nestjs-storage
 Install only the SDKs you need:
 
 ```bash
-# For S3 or R2 driver
+# For S3, R2, MinIO, B2, DigitalOcean Spaces, or Wasabi driver
 npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner
 
-# For GCS driver
+# For presigned POST (direct browser-to-cloud uploads) on S3/R2
+npm install @aws-sdk/s3-presigned-post
+
+# For GCS driver (also enables presigned POST on GCS)
 npm install @google-cloud/storage
+
+# For Azure Blob Storage driver
+npm install @azure/storage-blob
 ```
 
 ## Quick Start
@@ -357,6 +379,120 @@ Google Cloud Storage.
 - Authentication via `keyFilename`, `credentials` object, or Application Default Credentials (ADC)
 - Multipart uploads use the GCS compose API (batches of 32 objects max, automatically handled)
 - Signed URLs via `file.getSignedUrl()`
+
+### Azure Blob Storage Driver
+
+Microsoft Azure Blob Storage. Requires `@azure/storage-blob`.
+
+```typescript
+{
+  driver: 'azure',
+  accountName: 'myaccount',     // Storage account name (required)
+  accountKey: 'base64key==',    // Shared key — use this OR sasToken (not both)
+  sasToken: 'sv=2021&...',      // SAS token — alternative to accountKey (optional)
+  containerName: 'uploads',     // Container name (required; falls back to bucket)
+  url: undefined,               // Custom base URL (optional)
+  throw: true,                  // Throw on errors (optional)
+}
+```
+
+**Notes:**
+
+- Requires `@azure/storage-blob` to be installed (`npm install @azure/storage-blob`)
+- Authentication: either `accountKey` (SharedKey) or `sasToken`
+- `temporaryUrl()` and `presignedPost()` require `accountKey`; they are not supported with `sasToken`
+- Per-blob visibility is not supported — visibility is controlled at the container level
+- `setVisibility()` throws `StoragePermissionError`; `getVisibility()` always returns `'private'`
+- Multipart uploads use the Azure Block Blob API (`stageBlock` / `commitBlockList`)
+
+### MinIO Driver
+
+MinIO object storage. Extends `S3Disk` with path-style URLs.
+
+```typescript
+{
+  driver: 'minio',
+  endpoint: 'http://localhost:9000',  // MinIO endpoint URL (required)
+  bucket: 'my-bucket',                // Bucket name (required)
+  key: 'minioadmin',                  // Access key (required)
+  secret: 'minioadmin',               // Secret key (required)
+  region: 'us-east-1',               // Region (optional; defaults to 'us-east-1')
+  url: undefined,                     // Custom base URL for public files (optional)
+  throw: true,                        // Throw on errors (optional)
+}
+```
+
+**Notes:**
+
+- Endpoint is required. All S3Disk features (presignedPost, temporaryUrl, multipart) are supported
+- URLs are path-style: `http(s)://endpoint/bucket/key`
+
+### Backblaze B2 Driver
+
+Backblaze B2 via B2's S3-compatible endpoint. Extends `S3Disk`.
+
+```typescript
+{
+  driver: 'b2',
+  bucket: 'my-bucket',        // B2 bucket name (required)
+  region: 'us-west-004',      // B2 region (required; e.g. 'us-west-004')
+  key: '<keyId>',             // B2 application key ID (required)
+  secret: '<appKey>',         // B2 application key (required)
+  endpoint: undefined,        // Auto-configured; override if needed (optional)
+  url: undefined,             // Custom CDN URL (optional)
+  throw: true,
+}
+```
+
+**Notes:**
+
+- Endpoint auto-configured to `https://s3.{region}.backblazeb2.com`
+- Public URL uses the B2 friendly pattern: `https://f002.backblazeb2.com/file/{bucket}/{key}`
+- B2 does not support per-object ACLs
+
+### DigitalOcean Spaces Driver
+
+DigitalOcean Spaces via the Spaces S3-compatible API. Extends `S3Disk`.
+
+```typescript
+{
+  driver: 'digitalocean',
+  bucket: 'my-space',       // Space name (required)
+  region: 'nyc3',           // Region (required; e.g. 'nyc3', 'sfo3', 'ams3')
+  key: '<accessKey>',       // Spaces access key (required)
+  secret: '<secretKey>',    // Spaces secret key (required)
+  endpoint: undefined,      // Auto-configured; override if needed (optional)
+  url: undefined,           // Custom CDN URL (optional)
+  throw: true,
+}
+```
+
+**Notes:**
+
+- Endpoint auto-configured to `https://{region}.digitaloceanspaces.com`
+- Virtual-hosted URL: `https://{bucket}.{region}.digitaloceanspaces.com/{key}`
+
+### Wasabi Driver
+
+Wasabi cloud storage via Wasabi's S3-compatible endpoint. Extends `S3Disk`.
+
+```typescript
+{
+  driver: 'wasabi',
+  bucket: 'my-bucket',      // Bucket name (required)
+  region: 'us-east-1',      // Region (required)
+  key: '<accessKey>',       // Access key (required)
+  secret: '<secretKey>',    // Secret key (required)
+  endpoint: undefined,      // Auto-configured; override if needed (optional)
+  url: undefined,           // Custom CDN URL (optional)
+  throw: true,
+}
+```
+
+**Notes:**
+
+- Endpoint auto-configured to `https://s3.{region}.wasabisys.com`
+- URL pattern: `https://s3.{region}.wasabisys.com/{bucket}/{key}`
 
 ## Usage
 
@@ -934,6 +1070,263 @@ const teamDisk = orgDisk.scope('team/eng');       // prefix: org/acme/team/eng
 
 `ScopedDisk` implements the full `FilesystemContract` — every method works as expected, paths are prepended transparently, and listed paths have the prefix stripped so callers see relative paths.
 
+## EncryptedDisk
+
+`EncryptedDisk` is a decorator that transparently encrypts every file written to any underlying disk and decrypts every file read from it. It uses **AES-256-GCM** (authenticated encryption) with a random 12-byte IV stored alongside each blob.
+
+### Setup
+
+Use `StorageService.encrypted(diskName, { key })` to wrap any configured disk:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { StorageService } from '@fozooni/nestjs-storage';
+
+@Injectable()
+export class SecureFileService {
+  constructor(private readonly storage: StorageService) {}
+
+  private get enc() {
+    return this.storage.encrypted('local', {
+      key: process.env.ENCRYPTION_KEY, // 64-character hex string = 32 bytes
+    });
+  }
+
+  async store(filename: string, data: Buffer) {
+    await this.enc.put(`secrets/${filename}`, data);
+  }
+
+  async retrieve(filename: string): Promise<Buffer> {
+    return this.enc.get(`secrets/${filename}`) as Promise<Buffer>;
+  }
+}
+```
+
+### Key Format
+
+The key must be exactly **32 bytes** for AES-256-GCM. Pass it as:
+
+- A **64-character hex string** (e.g. `process.env.ENCRYPTION_KEY`) — parsed via `Buffer.from(key, 'hex')`
+- A **`Buffer`** of length 32
+
+```bash
+# Generate a 32-byte key
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Notes
+
+- Blob layout: `[IV (12 bytes)] + [AuthTag (16 bytes)] + [Ciphertext]`
+- `size()` reports the **plaintext** length (ciphertext overhead stripped)
+- `copy()` decrypts then re-encrypts at the destination (no cross-key copies)
+- `presignedPost()` is **not supported** on `EncryptedDisk` — direct uploads would bypass encryption
+
+## Presigned POST
+
+Presigned POST allows clients (e.g. browsers) to upload files **directly to cloud storage** without routing through your NestJS server. Supported on S3, R2, and GCS.
+
+### Generating a Presigned POST Policy
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { StorageService } from '@fozooni/nestjs-storage';
+
+@Injectable()
+export class UploadService {
+  constructor(private readonly storage: StorageService) {}
+
+  async getUploadPolicy(filename: string) {
+    const disk = this.storage.disk(); // or .disk('s3')
+    return disk.presignedPost(`uploads/${filename}`, {
+      expires: 3600,            // Policy valid for 1 hour (default: 3600)
+      maxSize: 10 * 1024 * 1024, // Max 10 MB
+      allowedMimeTypes: ['image/jpeg', 'image/png'],
+    });
+    // Returns: { url: string, fields: Record<string, string> }
+  }
+}
+```
+
+### Using the Policy in a Browser
+
+```html
+<form action="{{ policy.url }}" method="POST" enctype="multipart/form-data">
+  <!-- Inject all fields as hidden inputs -->
+  <input type="hidden" name="key" value="{{ policy.fields.key }}" />
+  <!-- ...repeat for each field... -->
+  <input type="file" name="file" />
+  <button type="submit">Upload</button>
+</form>
+```
+
+### Notes
+
+- S3/R2: requires `@aws-sdk/s3-presigned-post` (`npm install @aws-sdk/s3-presigned-post`)
+- GCS: requires `@google-cloud/storage` (already used by the GCS driver)
+- Azure: uses SAS-based PUT URL (not a POST policy). The returned `fields` contain required headers (`x-ms-blob-type: BlockBlob`)
+- `EncryptedDisk` does **not** support `presignedPost` — direct uploads bypass encryption
+
+## HMAC Signed URLs for LocalDisk
+
+By default, `LocalDisk.temporaryUrl()` emits a warning and returns an unsigned URL. Enable real HMAC-SHA256 signed URLs by setting `signSecret` in the disk config.
+
+### Configuration
+
+```typescript
+StorageModule.forRoot({
+  default: 'local',
+  disks: {
+    local: {
+      driver: 'local',
+      root: './storage',
+      url: 'http://localhost:3000/files',  // Base URL prepended to signed URLs
+      signSecret: process.env.LOCAL_SIGN_SECRET,  // 32+ character secret
+    },
+  },
+});
+```
+
+### Generated URL Format
+
+```
+http://localhost:3000/files/uploads/photo.jpg?expires=1735689600&signature=<hmac-sha256-hex>
+```
+
+### Verifying Signatures with `LocalSignedUrlMiddleware`
+
+Mount the middleware on the routes that serve local files:
+
+```typescript
+import { Module, NestModule, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
+import { LocalSignedUrlMiddleware } from '@fozooni/nestjs-storage';
+
+@Module({})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(new LocalSignedUrlMiddleware(process.env.LOCAL_SIGN_SECRET))
+      .forRoutes({ path: '/files/*', method: RequestMethod.GET });
+  }
+}
+```
+
+The middleware returns **403** for:
+- Missing `expires` or `signature` query parameters
+- Expired URLs (`Date.now() / 1000 > expires`)
+- Invalid HMAC signature (timing-safe comparison via `crypto.timingSafeEqual`)
+
+## Typed Error Hierarchy
+
+All drivers throw typed errors that extend the base `StorageError` class. Catch specific subtypes for fine-grained error handling:
+
+```typescript
+import {
+  StorageError,
+  StorageFileNotFoundError,
+  StoragePermissionError,
+  StorageNetworkError,
+  StorageConfigurationError,
+  StorageQuotaExceededError,
+} from '@fozooni/nestjs-storage';
+
+try {
+  await storage.get('missing.txt');
+} catch (e) {
+  if (e instanceof StorageFileNotFoundError) {
+    throw new NotFoundException('File not found');
+  }
+  if (e instanceof StoragePermissionError) {
+    throw new ForbiddenException('Access denied');
+  }
+  if (e instanceof StorageNetworkError) {
+    // Safe to retry with back-off
+    throw new ServiceUnavailableException('Storage unavailable, please retry');
+  }
+  if (e instanceof StorageError) {
+    // Any other storage error
+    throw new InternalServerErrorException('Storage error');
+  }
+}
+```
+
+### Error Class Reference
+
+| Class | `instanceof StorageError` | When thrown |
+|---|---|---|
+| `StorageError` | ✅ (base) | Never thrown directly |
+| `StorageFileNotFoundError` | ✅ | File/directory not found (HTTP 404) |
+| `StoragePermissionError` | ✅ | Access denied, unsupported operation (HTTP 403) |
+| `StorageNetworkError` | ✅ | Transient network or 5xx errors — safe to retry |
+| `StorageConfigurationError` | ✅ | Missing required config, optional peer not installed |
+| `StorageQuotaExceededError` | ✅ | Write would exceed storage quota |
+
+Every error carries optional `disk`, `path`, and `cause` fields:
+
+```typescript
+catch (e) {
+  if (e instanceof StorageError) {
+    console.error(`[${e.disk}] ${e.name} on path ${e.path}: ${e.message}`);
+    if (e.cause) console.error('Caused by:', e.cause);
+  }
+}
+```
+
+## Audit Logging
+
+Enable audit logging by setting `auditLog: true` in the module options:
+
+```typescript
+StorageModule.forRoot({
+  auditLog: true,
+  default: 'local',
+  disks: { ... },
+});
+```
+
+This registers `StorageAuditService`, which logs every `put`, `putFile`, `delete`, `copy`, `move`, and `deleteMany` call via NestJS `Logger`.
+
+### Custom Audit Sink
+
+Inject `StorageAuditService` and register your own sink (e.g. a database logger):
+
+```typescript
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { StorageAuditService, AuditSink, AuditEntry } from '@fozooni/nestjs-storage';
+
+@Injectable()
+class DatabaseAuditSink implements AuditSink {
+  log(entry: AuditEntry): void {
+    // e.g. save to your audit_log table
+    this.db.auditLog.create({ data: entry });
+  }
+}
+
+@Injectable()
+export class AppSetup implements OnModuleInit {
+  constructor(
+    private readonly audit: StorageAuditService,
+    private readonly dbSink: DatabaseAuditSink,
+  ) {}
+
+  onModuleInit() {
+    this.audit.addSink(this.dbSink);
+  }
+}
+```
+
+### `AuditEntry` Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `operation` | `string` | `'put'`, `'putFile'`, `'delete'`, `'copy'`, `'move'`, `'deleteMany'` |
+| `disk` | `string` | Name of the disk (e.g. `'local'`, `'s3'`) |
+| `path` | `string?` | File path involved (omitted for `deleteMany`) |
+| `userId` | `string?` | Optional user ID (set by you if needed) |
+| `ip` | `string?` | Optional client IP (set by you if needed) |
+| `timestamp` | `Date` | When the operation occurred |
+| `success` | `boolean` | Whether the operation succeeded |
+| `error` | `string?` | Error message if `success === false` |
+
 ## Health Checks
 
 Integrate with `@nestjs/terminus` for storage health monitoring:
@@ -1340,6 +1733,60 @@ npm install @fozooni/nestjs-storage@0.0.3
 - **Scoped Disks** — `storage.scope('prefix')` / `disk.scope('prefix')` for path-prefixed disk instances.
 
 **For custom driver authors:** New `scope?(prefix: string): FilesystemContract` is an optional addition to `FilesystemContract`. Existing custom drivers are unaffected; add `scope()` if you want scoping support on your driver.
+
+## Upgrading from 0.0.3
+
+v0.0.4 is mostly a **non-breaking** upgrade, but includes one important behavioral change for error handling.
+
+```bash
+npm install @fozooni/nestjs-storage@0.0.4
+```
+
+### What's new
+
+- **9 drivers** — added Azure Blob Storage, MinIO, Backblaze B2, DigitalOcean Spaces, and Wasabi
+- **Typed errors** — all drivers now throw `StorageError` subclasses instead of bare `Error`
+- **EncryptedDisk** — `storage.encrypted(diskName, { key })` wraps any disk with AES-256-GCM
+- **Presigned POST** — `disk.presignedPost(path, options?)` for direct browser-to-cloud uploads
+- **HMAC Signed URLs** — `LocalDisk` with `signSecret` + `LocalSignedUrlMiddleware`
+- **Audit logging** — `auditLog: true` in module config + pluggable `AuditSink`
+
+### Migration: typed errors
+
+v0.0.4 replaces all bare `throw new Error(...)` in drivers with typed subclasses of `StorageError`. If you were catching storage errors by message string matching, update your `catch` blocks:
+
+**Before (v0.0.3 and earlier):**
+
+```typescript
+try {
+  await storage.get('file.txt');
+} catch (e) {
+  if (e instanceof Error && e.message.includes('not found')) { ... }
+}
+```
+
+**After (v0.0.4+):**
+
+```typescript
+import { StorageFileNotFoundError } from '@fozooni/nestjs-storage';
+
+try {
+  await storage.get('file.txt');
+} catch (e) {
+  if (e instanceof StorageFileNotFoundError) { ... }
+}
+```
+
+### Migration: LocalDisk warning message
+
+If you have a test that checks for the exact warning message from `LocalDisk.temporaryUrl()`, update it — the message now mentions `signSecret`:
+
+```typescript
+// Old
+expect(consoleSpy).toHaveBeenCalledWith('Local disk does not support temporary URLs');
+// New
+expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('signSecret'));
+```
 
 ## License
 
