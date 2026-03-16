@@ -160,6 +160,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
   - [Upgrading from 0.0.2](#upgrading-from-002)
   - [Upgrading from 0.0.3](#upgrading-from-003)
   - [Upgrading from 0.0.4](#upgrading-from-004)
+  - [Upgrading to v0.1.0](#upgrading-to-v010)
   - [License](#license)
 
 ## Installation
@@ -174,6 +175,8 @@ pnpm add @fozooni/nestjs-storage
 # Using yarn
 yarn add @fozooni/nestjs-storage
 ```
+
+> **For AI tools** (Cursor, Copilot, Claude Code, etc.): see [llm.md](llm.md) for a compact quick-reference or [llm-full.md](llm-full.md) for the complete API surface.
 
 ### Driver-specific dependencies
 
@@ -2181,6 +2184,49 @@ Invalid disk configs (e.g. missing `bucket` for S3) now throw `StorageConfigurat
 
 ---
 
+## Upgrading to v0.1.0
+
+v0.1.0 is **fully backwards compatible**. All changes are additive. No breaking changes.
+
+### New optional peer dependencies
+
+Install only what you use:
+
+```bash
+# Streaming ZIP/TAR archives
+npm install archiver
+```
+
+### New auto-registered services
+
+`StorageMigrator`, `StorageUploadProgressService`, and `StorageArchiver` are now automatically registered and exported by `StorageModule`. You can inject them directly:
+
+```typescript
+constructor(
+  private readonly migrator: StorageMigrator,
+  private readonly progress: StorageUploadProgressService,
+  private readonly archiver: StorageArchiver,
+) {}
+```
+
+### New FilesystemContract optional methods
+
+The following optional methods are now defined on `FilesystemContract` and delegated by `DiskDecorator`:
+
+```typescript
+listVersions?(path): Promise<FileVersion[]>
+getVersion?(path, versionId): Promise<Buffer>
+restoreVersion?(path, versionId): Promise<boolean>
+deleteVersion?(path, versionId): Promise<boolean>
+getRange?(path, opts: RangeOptions): Promise<RangeResult>
+putIfMatch?(path, content, etag, opts?): Promise<ConditionalWriteResult>
+putIfNoneMatch?(path, content, opts?): Promise<ConditionalWriteResult>
+```
+
+These are implemented on `LocalDisk`, `S3Disk` (and its subclasses), `GcsDisk`, `AzureDisk`, and `FakeDisk`.
+
+---
+
 ## File Versioning (VersionedDisk)
 
 `VersionedDisk` wraps any disk and automatically snapshots the previous content of a file before overwriting it. Snapshots are stored in a `.versions/{path}/` directory on the same disk.
@@ -2501,47 +2547,6 @@ if (!success) {
 | `LocalDisk` | MD5-based | Existence check |
 | `S3Disk` (and R2, MinIO, B2, DO, Wasabi) | `IfMatch` header | `IfNoneMatch: *` |
 | `FakeDisk` | MD5-based | Existence check |
-
-## Upgrading to v0.1.0
-
-v0.1.0 is **fully backwards compatible**. All changes are additive. No breaking changes.
-
-### New optional peer dependencies
-
-Install only what you use:
-
-```bash
-# Streaming ZIP/TAR archives
-npm install archiver
-```
-
-### New auto-registered services
-
-`StorageMigrator`, `StorageUploadProgressService`, and `StorageArchiver` are now automatically registered and exported by `StorageModule`. You can inject them directly:
-
-```typescript
-constructor(
-  private readonly migrator: StorageMigrator,
-  private readonly progress: StorageUploadProgressService,
-  private readonly archiver: StorageArchiver,
-) {}
-```
-
-### New FilesystemContract optional methods
-
-The following optional methods are now defined on `FilesystemContract` and delegated by `DiskDecorator`:
-
-```typescript
-listVersions?(path): Promise<FileVersion[]>
-getVersion?(path, versionId): Promise<Buffer>
-restoreVersion?(path, versionId): Promise<boolean>
-deleteVersion?(path, versionId): Promise<boolean>
-getRange?(path, opts: RangeOptions): Promise<RangeResult>
-putIfMatch?(path, content, etag, opts?): Promise<ConditionalWriteResult>
-putIfNoneMatch?(path, content, opts?): Promise<ConditionalWriteResult>
-```
-
-These are implemented on `LocalDisk`, `S3Disk` (and its subclasses), `GcsDisk`, `AzureDisk`, and `FakeDisk`.
 
 ## License
 
