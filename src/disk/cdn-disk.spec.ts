@@ -44,9 +44,22 @@ describe('CdnDisk', () => {
     });
 
     it('throws when cloudfront signer not installed', async () => {
-      // @aws-sdk/cloudfront-signer is an optional peer that is NOT installed in devDependencies.
-      // CdnDisk catches the require() error and re-throws with a helpful message.
-      const disk = new CdnDisk(inner, {
+      // Simulate @aws-sdk/cloudfront-signer not being installed by resetting
+      // the module registry and mocking it to throw MODULE_NOT_FOUND.
+      jest.resetModules();
+      jest.doMock('@aws-sdk/cloudfront-signer', () => {
+        const err: NodeJS.ErrnoException = new Error(
+          "Cannot find module '@aws-sdk/cloudfront-signer'",
+        );
+        err.code = 'MODULE_NOT_FOUND';
+        throw err;
+      });
+
+      const { CdnDisk: FreshCdnDisk } = await import('./cdn-disk');
+      const { FakeDisk: FreshFakeDisk } = await import('../testing/fake-disk');
+
+      const freshInner = new FreshFakeDisk();
+      const disk = new FreshCdnDisk(freshInner, {
         baseUrl: 'https://d111.cloudfront.net',
         provider: 'cloudfront',
         signingKeyId: 'K2JCJMDEHXQW5F',
@@ -56,6 +69,9 @@ describe('CdnDisk', () => {
       await expect(disk.temporaryUrl('file.txt', 3600)).rejects.toThrow(
         '@aws-sdk/cloudfront-signer',
       );
+
+      jest.dontMock('@aws-sdk/cloudfront-signer');
+      jest.resetModules();
     });
   });
 
