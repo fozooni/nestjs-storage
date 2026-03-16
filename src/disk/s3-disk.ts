@@ -19,6 +19,7 @@ import {
   PresignedPostData,
   PresignedPostOptions,
   PutOptions,
+  S3FileMetadata,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
 import { StorageConfigurationError, StorageNetworkError } from '../errors/storage-errors';
@@ -441,11 +442,11 @@ export class S3Disk implements FilesystemContract {
     }
   }
 
-  async getMetadata(path: string): Promise<FileMetadata> {
+  async getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T> {
     const key = sanitizePath(path);
     const response = await this.client.headObject(key);
 
-    return {
+    const meta: S3FileMetadata = {
       path: key,
       size: response.contentLength || 0,
       lastModified: response.lastModified || new Date(),
@@ -454,8 +455,10 @@ export class S3Disk implements FilesystemContract {
       extension: path.split('.').pop() || response.contentType?.split('/')[1] || '',
       visibility: await this.getVisibility(path),
       s3_bucket: this.client.getBucket(),
-      ...response.metadata,
+      etag: response.etag?.replace(/"/g, ''),
+      s3Metadata: response.metadata,
     };
+    return meta as unknown as T;
   }
 
   async mimeType(path: string): Promise<string> {
@@ -750,9 +753,21 @@ export class S3Disk implements FilesystemContract {
     return !(await this.exists(path));
   }
 
-  async json<T = unknown>(path: string): Promise<T> {
+  async json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T> {
     const content = await this.get(path, { responseType: 'string' });
-    return JSON.parse(content as string);
+    const parsed = JSON.parse(content as string) as unknown;
+    return schema ? schema.parse(parsed) : (parsed as T);
+  }
+
+  async putTemp(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    ttlSeconds: number,
+    options?: PutOptions,
+  ): Promise<string> {
+    const expires = new Date(Date.now() + ttlSeconds * 1000);
+    await this.put(path, content, { ...options, Expires: expires });
+    return path;
   }
 
   async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {

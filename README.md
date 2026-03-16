@@ -5,7 +5,7 @@
 [![npm downloads](https://img.shields.io/npm/dt/@fozooni/nestjs-storage.svg)](https://www.npmjs.com/package/@fozooni/nestjs-storage)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob Storage, MinIO, Backblaze B2, DigitalOcean Spaces, and Wasabi.
+A powerful, driver-based storage module for NestJS with a unified API across Local filesystem, Amazon S3, Cloudflare R2, Google Cloud Storage, Azure Blob Storage, MinIO, Backblaze B2, DigitalOcean Spaces, and Wasabi. Featuring a full decorator stack for caching, retries, replication, CDN URLs, OpenTelemetry tracing, storage quotas, and more.
 
 ## Support
 
@@ -43,6 +43,16 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 - **HMAC Signed URLs** — Secure temporary URLs for LocalDisk via `LocalSignedUrlMiddleware`
 - **Typed Error Hierarchy** — `StorageError`, `StorageFileNotFoundError`, `StoragePermissionError`, and more
 - **Audit Logging** — Pluggable `AuditSink` interface to record every storage operation
+- **DiskDecorator Base** — Abstract base class for all disk decorators; eliminates passthrough boilerplate
+- **CachedDisk** — In-memory (or custom) caching for read-heavy operations with per-method TTL
+- **RetryDisk** — Full-jitter exponential backoff for transient failures with custom `retryOn` predicate
+- **ReplicatedDisk** — `'all'`, `'quorum'`, or `'async'` write replication across multiple disks
+- **CdnDisk** — CDN URL generation and CloudFront signed URL support
+- **OtelDisk** — OpenTelemetry tracing (zero-overhead no-op when `@opentelemetry/api` is absent)
+- **QuotaDisk** — Byte-level quota enforcement with pluggable `QuotaStore`
+- **Config Validation** — `DiskConfigValidator` catches missing required fields at construction time
+- **Temporary Files with TTL** — `putTemp()` + `StorageTempCleanupService` for expiring files
+- **TypeScript Generics** — `getMetadata<T>()`, `json<T>(path, schema?)`, `S3FileMetadata`, `GcsFileMetadata`
 - **Dual CJS/ESM** — Ships both CommonJS and ES modules with TypeScript declarations
 - **Optional Peer Dependencies** — Only install the SDK you need
 
@@ -96,6 +106,17 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
   - [HMAC Signed URLs for LocalDisk](#hmac-signed-urls-for-localdisk)
   - [Typed Error Hierarchy](#typed-error-hierarchy)
   - [Audit Logging](#audit-logging)
+  - [Decorator Disks](#decorator-disks)
+    - [DiskDecorator — Abstract Base](#diskdecorator--abstract-base)
+    - [CachedDisk](#cacheddisk)
+    - [RetryDisk](#retrydisk)
+    - [ReplicatedDisk](#replicateddisk)
+    - [CdnDisk](#cdndisk)
+    - [OtelDisk (OpenTelemetry)](#oteldisk-opentelemetry)
+    - [QuotaDisk](#quotadisk)
+  - [Config Validation](#config-validation)
+  - [Temporary Files with TTL](#temporary-files-with-ttl)
+  - [TypeScript Generics](#typescript-generics)
   - [Health Checks](#health-checks)
   - [Testing](#testing)
     - [Using FakeDisk](#using-fakedisk)
@@ -124,6 +145,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
   - [Upgrading from 0.0.1](#upgrading-from-001)
   - [Upgrading from 0.0.2](#upgrading-from-002)
   - [Upgrading from 0.0.3](#upgrading-from-003)
+  - [Upgrading from 0.0.4](#upgrading-from-004)
   - [License](#license)
 
 ## Installation
@@ -155,6 +177,15 @@ npm install @google-cloud/storage
 
 # For Azure Blob Storage driver
 npm install @azure/storage-blob
+
+# For CdnDisk with CloudFront signed URLs (optional)
+npm install @aws-sdk/cloudfront-signer
+
+# For OtelDisk (OpenTelemetry tracing, optional)
+npm install @opentelemetry/api
+
+# For json<T>() with Zod schema validation (optional)
+npm install zod
 ```
 
 ## Quick Start
@@ -1327,6 +1358,313 @@ export class AppSetup implements OnModuleInit {
 | `success` | `boolean` | Whether the operation succeeded |
 | `error` | `string?` | Error message if `success === false` |
 
+## Decorator Disks
+
+v0.0.5 introduces a decorator stack — composable wrappers that add behaviour to any `FilesystemContract` without changing the underlying driver.
+
+### DiskDecorator — Abstract Base
+
+`DiskDecorator` is the abstract base that all built-in decorator disks extend. It auto-delegates every `FilesystemContract` method to the wrapped inner disk so subclasses only need to override the methods they transform.
+
+```typescript
+import { DiskDecorator, FilesystemContract } from '@fozooni/nestjs-storage';
+
+export class LoggingDisk extends DiskDecorator {
+  override async put(path, contents, options?) {
+    console.log(`put → ${path}`);
+    return super.put(path, contents, options);
+  }
+}
+
+const loggingDisk = new LoggingDisk(storage.disk('s3'));
+```
+
+### CachedDisk
+
+`CachedDisk` caches read-heavy operations — `exists`, `size`, `lastModified`, `mimeType`, `getMetadata`, and `getVisibility` — and automatically invalidates the cache on every write.
+
+```typescript
+// Via StorageService factory
+const cached = storage.cached('s3', {
+  ttl: 60_000, // 60 seconds default TTL
+  ttlByMethod: {
+    exists: 5_000,      // check freshness more often
+    getMetadata: 30_000,
+  },
+});
+
+await cached.exists('photo.jpg');  // → hits S3
+await cached.exists('photo.jpg');  // → served from cache
+await cached.put('photo.jpg', buffer); // → cache invalidated
+await cached.exists('photo.jpg');  // → hits S3 again
+```
+
+**Custom cache backend** (e.g. Redis):
+
+```typescript
+import { CacheBackend, CachedDisk } from '@fozooni/nestjs-storage';
+
+class RedisCache implements CacheBackend {
+  get<T>(key: string): T | undefined { /* ... */ }
+  set<T>(key: string, value: T, ttlMs?: number): void { /* ... */ }
+  del(key: string): void { /* ... */ }
+  clear(): void { /* ... */ }
+}
+
+const cached = storage.cached('s3', { backend: new RedisCache() });
+```
+
+### RetryDisk
+
+`RetryDisk` wraps a disk with full-jitter exponential backoff. It retries on `StorageNetworkError` and skips non-retryable errors (`StorageFileNotFoundError`, `StoragePermissionError`, `StorageConfigurationError`).
+
+```typescript
+const retryable = storage.withRetry('s3', {
+  maxRetries: 3,      // default
+  baseDelay: 100,     // ms
+  maxDelay: 10_000,   // ms
+  factor: 2,          // backoff multiplier
+  jitter: true,       // full-jitter (default)
+});
+
+// Optionally, subscribe to retry events
+storageEvents.on(StorageEvents.RETRY, (event) => {
+  logger.warn(`Retrying ${event.operation} (attempt ${event.attempt}/${event.maxRetries})`);
+});
+```
+
+**Custom retry predicate:**
+
+```typescript
+const disk = storage.withRetry('s3', {
+  retryOn: (err) => err instanceof StorageNetworkError || (err as any).code === 'ECONNRESET',
+});
+```
+
+### ReplicatedDisk
+
+`ReplicatedDisk` propagates writes to multiple replica disks. Reads are always served from the primary.
+
+```typescript
+const r2Disk = storage.disk('r2');
+const backupDisk = storage.disk('b2');
+
+const replicated = storage.replicated('s3', [r2Disk, backupDisk], {
+  strategy: 'all', // 'all' | 'quorum' | 'async'
+});
+
+await replicated.put('file.txt', 'hello'); // written to s3 + r2 + b2
+await replicated.get('file.txt');          // read from s3 only
+```
+
+| Strategy | Behaviour |
+|---|---|
+| `'all'` (default) | All replicas must succeed (`Promise.all`). Fails if any replica fails. |
+| `'quorum'` | Majority must succeed. Individual replica failures tolerated. |
+| `'async'` | Fire-and-forget replication. Returns as soon as primary succeeds. |
+
+### CdnDisk
+
+`CdnDisk` overrides `url()` and `temporaryUrl()` to return CDN-prefixed URLs.
+
+**Automatic via config:**
+
+```typescript
+StorageModule.forRoot({
+  disks: {
+    s3: {
+      driver: 's3',
+      bucket: 'my-bucket',
+      region: 'us-east-1',
+      cdn: {
+        baseUrl: 'https://cdn.example.com',
+        provider: 'cloudfront',       // or 'generic'
+        signingKeyId: 'KEYID',        // CloudFront only
+        signingKey: 'PRIVATE_KEY_PEM', // CloudFront only
+      },
+    },
+  },
+});
+```
+
+When `cdn` is set on a disk config, `StorageService.disk()` automatically wraps the disk in `CdnDisk`.
+
+**Manual wrapping:**
+
+```typescript
+import { CdnDisk } from '@fozooni/nestjs-storage';
+
+const cdnDisk = new CdnDisk(storage.disk('s3'), {
+  baseUrl: 'https://cdn.example.com',
+});
+cdnDisk.url('images/photo.jpg'); // → 'https://cdn.example.com/images/photo.jpg'
+```
+
+CloudFront signed URLs require `@aws-sdk/cloudfront-signer` (optional peer):
+
+```bash
+npm install @aws-sdk/cloudfront-signer
+```
+
+### OtelDisk (OpenTelemetry)
+
+`OtelDisk` wraps every storage operation in an OpenTelemetry span. If `@opentelemetry/api` is not installed, all operations pass through with zero overhead.
+
+```typescript
+const traced = storage.withTracing('s3');
+
+// Span attributes: storage.disk, storage.operation, storage.path
+await traced.put('file.txt', data); // → span recorded
+```
+
+Install the OTel API (optional peer):
+
+```bash
+npm install @opentelemetry/api
+```
+
+### QuotaDisk
+
+`QuotaDisk` enforces byte-level storage quotas and throws `StorageQuotaExceededError` when the limit is reached.
+
+```typescript
+import { MemoryQuotaStore, QuotaDisk } from '@fozooni/nestjs-storage';
+
+const quotaStore = new MemoryQuotaStore();
+const disk = storage.withQuota('local', quotaStore, {
+  maxBytes: 100 * 1024 * 1024, // 100 MB
+  prefix: 'users/123',          // optional: per-user quota
+});
+
+await disk.put('file.txt', largeBuffer); // throws StorageQuotaExceededError if over limit
+
+const { used, limit, percent } = await disk.getUsage();
+console.log(`${percent.toFixed(1)}% used (${used} / ${limit} bytes)`);
+```
+
+**Custom `QuotaStore`** (e.g. Redis-backed):
+
+```typescript
+class RedisQuotaStore implements QuotaStore {
+  async getUsage(prefix?: string): Promise<number> { /* ... */ }
+  async addUsage(prefix: string | undefined, bytes: number): Promise<void> { /* ... */ }
+  async removeUsage(prefix: string | undefined, bytes: number): Promise<void> { /* ... */ }
+}
+```
+
+---
+
+## Config Validation
+
+`DiskConfigValidator` validates disk configuration before constructing a disk, throwing `StorageConfigurationError` with a clear message that lists the disk name and all missing fields.
+
+Validation runs automatically inside `StorageService.disk()`. No extra setup required.
+
+```typescript
+// Missing 'bucket' and 'region' → throws StorageConfigurationError:
+// "Disk [my-s3]: driver 's3' requires: bucket, region"
+StorageModule.forRoot({
+  disks: {
+    'my-s3': { driver: 's3' }, // ← invalid!
+  },
+});
+```
+
+**Required fields per driver:**
+
+| Driver | Required fields |
+|---|---|
+| `local` | _(none)_ |
+| `s3` | `bucket`, `region` |
+| `r2` | `bucket`, `accountId` |
+| `gcs` | `bucket` |
+| `minio` | `bucket`, `endpoint` |
+| `b2` | `bucket`, `endpoint` |
+| `digitalocean` | `bucket`, `region`, `endpoint` |
+| `wasabi` | `bucket`, `region`, `endpoint` |
+| `azure` | `containerName`, at least one of `accountKey` \| `sasToken` |
+
+**CDN validation:** if `cdn` is provided, `cdn.baseUrl` is always required. For `provider: 'cloudfront'`, both `signingKeyId` and `signingKey` are required.
+
+---
+
+## Temporary Files with TTL
+
+Use `putTemp()` to write a file that should expire after a given number of seconds.
+
+```typescript
+// Write a file that expires in 24 hours
+await storage.disk('local').putTemp('sessions/token.txt', 'abc123', 86_400);
+
+// S3: sets the native Expires object metadata header
+await storage.disk('s3').putTemp('sessions/token.txt', 'abc123', 86_400);
+```
+
+### Cleaning up expired local files
+
+`StorageTempCleanupService` is automatically registered in the `StorageModule`. Inject it and call `runOnce()` to delete expired files (LocalDisk only — S3/GCS/Azure handle expiry natively).
+
+```typescript
+import { StorageTempCleanupService } from '@fozooni/nestjs-storage';
+
+@Injectable()
+export class CleanupTask {
+  constructor(private readonly tempCleanup: StorageTempCleanupService) {}
+
+  async cleanup() {
+    const { deleted, errors } = await this.tempCleanup.runOnce('local');
+    console.log(`Deleted ${deleted} expired files (${errors} errors)`);
+  }
+}
+```
+
+**With `@nestjs/schedule`:**
+
+```typescript
+@Cron('0 * * * *') // hourly
+async cleanup() {
+  await this.tempCleanup.runOnce('local');
+}
+```
+
+> For LocalDisk, `putTemp()` writes a `.ttl` sidecar JSON file alongside each temp file. `runOnce()` reads these sidecars, compares `expiresAt` with `Date.now()`, and deletes both files when expired.
+
+---
+
+## TypeScript Generics
+
+### Typed metadata
+
+`getMetadata<T>()` is now generic. Use driver-specific subtypes for strongly typed responses:
+
+```typescript
+import { S3FileMetadata, GcsFileMetadata } from '@fozooni/nestjs-storage';
+
+// S3 — includes etag, storageClass, versionId, serverSideEncryption
+const meta = await storage.disk('s3').getMetadata<S3FileMetadata>('photo.jpg');
+console.log(meta.etag, meta.storageClass);
+
+// GCS — includes generation, metageneration, crc32c, md5Hash
+const gcsMeta = await storage.disk('gcs').getMetadata<GcsFileMetadata>('photo.jpg');
+console.log(gcsMeta.generation, gcsMeta.crc32c);
+```
+
+### `json<T>()` with schema validation
+
+Pass any Zod-compatible schema (or any `{ parse(v: unknown): T }` object) to `json<T>()` for automatic validation:
+
+```typescript
+import { z } from 'zod';
+
+const UserSchema = z.object({ id: z.number(), name: z.string() });
+
+// Fetches, parses, and validates in one call:
+const user = await storage.disk('s3').json('users/1.json', UserSchema);
+// user is typed as { id: number; name: string }
+```
+
+---
+
 ## Health Checks
 
 Integrate with `@nestjs/terminus` for storage health monitoring:
@@ -1787,6 +2125,45 @@ expect(consoleSpy).toHaveBeenCalledWith('Local disk does not support temporary U
 // New
 expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('signSecret'));
 ```
+
+## Upgrading from 0.0.4
+
+v0.0.5 is fully backwards compatible. No breaking changes.
+
+### New optional peer dependencies
+
+Install only what you need for the new features:
+
+```bash
+# CdnDisk with CloudFront signed URLs
+npm install @aws-sdk/cloudfront-signer
+
+# OtelDisk (OpenTelemetry tracing)
+npm install @opentelemetry/api
+
+# json<T>() with Zod schema validation
+npm install zod
+```
+
+### `getMetadata` now generic
+
+If you were calling `getMetadata()` and casting the result manually, you can now pass the type argument directly:
+
+```typescript
+// Before (v0.0.4)
+const meta = (await disk.getMetadata('file.txt')) as S3FileMetadata;
+
+// After (v0.0.5)
+const meta = await disk.getMetadata<S3FileMetadata>('file.txt');
+```
+
+### Config validation
+
+Invalid disk configs (e.g. missing `bucket` for S3) now throw `StorageConfigurationError` at `StorageService.disk()` call time instead of later. You may see earlier errors in places that were silently misconfigured before. No action needed for valid configs.
+
+### `StorageTempCleanupService` is now exported
+
+`StorageTempCleanupService` is now automatically exported from `StorageModule`. You can inject it in any service without additional registration.
 
 ## License
 

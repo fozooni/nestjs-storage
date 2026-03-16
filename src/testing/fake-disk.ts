@@ -291,12 +291,12 @@ export class FakeDisk implements FilesystemContract {
 
   // --- Metadata ---
 
-  async getMetadata(path: string): Promise<FileMetadata> {
+  async getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T> {
     const key = normalizePath(path);
     const file = this.store.get(key);
     if (!file) throw new Error(`File not found: ${path}`);
 
-    return {
+    const meta: FileMetadata = {
       path: key,
       size: file.content.length,
       lastModified: file.updatedAt,
@@ -305,6 +305,7 @@ export class FakeDisk implements FilesystemContract {
       visibility: file.visibility,
       ...file.metadata,
     };
+    return meta as unknown as T;
   }
 
   async mimeType(path: string): Promise<string> {
@@ -331,9 +332,10 @@ export class FakeDisk implements FilesystemContract {
     return !(await this.exists(path));
   }
 
-  async json<T = unknown>(path: string): Promise<T> {
+  async json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T> {
     const content = await this.get(path, { responseType: 'string' });
-    return JSON.parse(content as string);
+    const parsed = JSON.parse(content as string) as unknown;
+    return schema ? schema.parse(parsed) : (parsed as T);
   }
 
   async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {

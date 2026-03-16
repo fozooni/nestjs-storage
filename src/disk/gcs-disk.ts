@@ -9,6 +9,7 @@ import {
   DiskConfig,
   FileMetadata,
   FilesystemContract,
+  GcsFileMetadata,
   GetOptions,
   MoveOptions,
   MultipartUploadInit,
@@ -397,11 +398,12 @@ export class GcsDisk implements FilesystemContract {
     }
   }
 
-  async getMetadata(path: string): Promise<FileMetadata> {
+  async getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T> {
     const key = sanitizePath(path);
     const response = await this.client.headObject(key);
 
-    return {
+    const meta: GcsFileMetadata = {
+      ...(response.metadata as Record<string, unknown>),
       path: key,
       size: response.contentLength || 0,
       lastModified: response.lastModified || new Date(),
@@ -410,8 +412,8 @@ export class GcsDisk implements FilesystemContract {
       extension: path.split('.').pop() || response.contentType?.split('/')[1] || '',
       visibility: await this.getVisibility(path),
       gcs_bucket: this.client.getBucket(),
-      ...response.metadata,
     };
+    return meta as unknown as T;
   }
 
   async mimeType(path: string): Promise<string> {
@@ -705,9 +707,10 @@ export class GcsDisk implements FilesystemContract {
     return !(await this.exists(path));
   }
 
-  async json<T = unknown>(path: string): Promise<T> {
+  async json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T> {
     const content = await this.get(path, { responseType: 'string' });
-    return JSON.parse(content as string);
+    const parsed = JSON.parse(content as string) as unknown;
+    return schema ? schema.parse(parsed) : (parsed as T);
   }
 
   async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {

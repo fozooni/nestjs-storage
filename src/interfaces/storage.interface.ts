@@ -3,6 +3,17 @@ export interface NamingStrategy {
   generate(file: any, originalName: string): string | Promise<string>;
 }
 
+export interface CdnConfig {
+  /** CDN base URL (e.g. `https://cdn.example.com`). */
+  baseUrl: string;
+  /** CloudFront key-pair ID (required when provider = 'cloudfront'). */
+  signingKeyId?: string;
+  /** CloudFront private key as a PEM string (required when provider = 'cloudfront'). */
+  signingKey?: string;
+  /** CDN provider. Use `'cloudfront'` for AWS CloudFront signed URLs. */
+  provider?: 'cloudfront' | 'generic';
+}
+
 export interface DiskConfig {
   driver:
     | 'local'
@@ -20,6 +31,9 @@ export interface DiskConfig {
   throw?: boolean;
   report?: boolean;
   visibility?: 'private' | 'public';
+
+  /** CDN integration — when set, `url()` returns CDN URLs automatically. */
+  cdn?: CdnConfig;
 
   // S3 / R2 shared fields
   key?: string;
@@ -62,6 +76,23 @@ export interface FileMetadata {
   extension?: string;
   visibility?: 'private' | 'public';
   [key: string]: any;
+}
+
+/** Typed S3 metadata returned by `S3Disk.getMetadata()`. */
+export interface S3FileMetadata extends FileMetadata {
+  etag?: string;
+  storageClass?: string;
+  versionId?: string;
+  serverSideEncryption?: string;
+  s3Metadata?: Record<string, string>;
+}
+
+/** Typed GCS metadata returned by `GcsDisk.getMetadata()`. */
+export interface GcsFileMetadata extends FileMetadata {
+  generation?: string;
+  metageneration?: string;
+  crc32c?: string;
+  md5Hash?: string;
 }
 
 export interface PutOptions {
@@ -173,6 +204,86 @@ export interface StreamableFileOptions {
   filename?: string;
 }
 
+// ─── v0.0.5 Interfaces ────────────────────────────────────────────────────────
+
+/**
+ * Pluggable cache backend for `CachedDisk`.
+ *
+ * The default implementation is `MemoryCacheBackend` (Map-based).
+ * You can provide a Redis-backed backend for distributed caching.
+ */
+export interface CacheBackend {
+  get<T>(key: string): T | undefined;
+  set<T>(key: string, value: T, ttlMs?: number): void;
+  del(key: string): void;
+  clear(): void;
+}
+
+/** Options for `CachedDisk`. */
+export interface CacheOptions {
+  /** Global TTL in milliseconds. `undefined` = no expiry. */
+  ttl?: number;
+  /** Per-method TTL overrides (ms). */
+  ttlByMethod?: Partial<
+    Record<
+      'exists' | 'size' | 'lastModified' | 'mimeType' | 'getMetadata' | 'getVisibility',
+      number
+    >
+  >;
+}
+
+/** Options for `RetryDisk`. */
+export interface RetryOptions {
+  /** Maximum number of retry attempts (default: 3). */
+  maxRetries?: number;
+  /** Base delay in ms for exponential backoff (default: 100). */
+  baseDelay?: number;
+  /** Maximum delay cap in ms (default: 10_000). */
+  maxDelay?: number;
+  /** Exponential factor (default: 2). */
+  factor?: number;
+  /** Apply full-jitter to backoff delays (default: true). */
+  jitter?: boolean;
+  /**
+   * Custom predicate to decide if an error is retryable.
+   * When provided, overrides the default retry logic.
+   */
+  retryOn?: (err: unknown) => boolean;
+}
+
+/** Options for `ReplicatedDisk`. */
+export interface ReplicationOptions {
+  /**
+   * Replication strategy (default: `'all'`):
+   * - `'all'`    — all replicas must succeed.
+   * - `'quorum'` — majority (>50%) of replicas must succeed.
+   * - `'async'`  — fire-and-forget replication; primary result returned immediately.
+   */
+  strategy?: 'all' | 'quorum' | 'async';
+}
+
+/**
+ * Pluggable quota store for `QuotaDisk`.
+ *
+ * The default implementation is `MemoryQuotaStore` (in-memory Map).
+ * Implement this interface for Redis-backed distributed quota tracking.
+ */
+export interface QuotaStore {
+  getUsage(prefix?: string): Promise<number>;
+  addUsage(prefix: string | undefined, bytes: number): Promise<void>;
+  removeUsage(prefix: string | undefined, bytes: number): Promise<void>;
+}
+
+/** Options for `QuotaDisk`. */
+export interface QuotaOptions {
+  /** Maximum allowed storage in bytes. */
+  maxBytes: number;
+  /** Optional path prefix to scope quota tracking. */
+  prefix?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface FilesystemContract {
   // Core operations
   exists(path: string): Promise<boolean>;
@@ -214,8 +325,8 @@ export interface FilesystemContract {
   prepend(path: string, data: string): Promise<boolean>;
   append(path: string, data: string): Promise<boolean>;
 
-  // Metadata
-  getMetadata(path: string): Promise<FileMetadata>;
+  // Metadata (generic — drivers return typed subtypes)
+  getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T>;
   mimeType(path: string): Promise<string>;
   directorySize(directory?: string): Promise<number>;
 
@@ -244,7 +355,8 @@ export interface FilesystemContract {
 
   // Convenience operations
   missing?(path: string): Promise<boolean>;
-  json?<T = unknown>(path: string): Promise<T>;
+  /** Parse JSON from a file. Pass a Zod-compatible schema for runtime validation. */
+  json?<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T>;
   checksum?(path: string, algorithm?: ChecksumAlgorithm): Promise<string>;
   deleteMany?(paths: string[]): Promise<DeleteManyResult>;
 
@@ -256,6 +368,17 @@ export interface FilesystemContract {
 
   // Scoped disk
   scope?(prefix: string): FilesystemContract;
+
+  // Temporary files with TTL
+  putTemp?(
+    path: string,
+    content: string | Buffer | NodeJS.ReadableStream,
+    ttlSeconds: number,
+    options?: PutOptions,
+  ): Promise<string>;
+
+  // CDN cache invalidation (optional — implemented by CdnDisk)
+  invalidateCdn?(paths: string[]): Promise<void>;
 }
 
 export interface StorageManager {
@@ -266,6 +389,17 @@ export interface StorageManager {
   extend(driver: string, callback: (config: DiskConfig) => FilesystemContract): void;
   setDisk(name: string, disk: FilesystemContract): void;
   scope(prefix: string, diskName?: string): FilesystemContract;
+
+  // v0.0.5 factory methods
+  cached(diskName: string, opts?: CacheOptions & { backend?: CacheBackend }): FilesystemContract;
+  withRetry(diskName: string, opts?: RetryOptions): FilesystemContract;
+  replicated(
+    diskName: string,
+    replicas: FilesystemContract[],
+    opts?: ReplicationOptions,
+  ): FilesystemContract;
+  withTracing(diskName: string): FilesystemContract;
+  withQuota(diskName: string, quotaStore: QuotaStore, opts: QuotaOptions): FilesystemContract;
 
   // Proxy methods to default disk
   exists(path: string): Promise<boolean>;
@@ -298,7 +432,7 @@ export interface StorageManager {
   ): Promise<string>;
   prepend(path: string, data: string): Promise<boolean>;
   append(path: string, data: string): Promise<boolean>;
-  getMetadata(path: string): Promise<FileMetadata>;
+  getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T>;
   mimeType(path: string): Promise<string>;
   directorySize(directory?: string): Promise<number>;
 
@@ -324,7 +458,7 @@ export interface StorageManager {
 
   // Convenience methods
   missing(path: string): Promise<boolean>;
-  json<T = unknown>(path: string): Promise<T>;
+  json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T>;
   checksum(path: string, algorithm?: ChecksumAlgorithm): Promise<string>;
   deleteMany(paths: string[]): Promise<DeleteManyResult>;
 }

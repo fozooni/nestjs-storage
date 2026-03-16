@@ -48,3 +48,7 @@ export * from './audit';
 
 // Middleware
 export * from './middleware';
+
+// v0.0.5 additions
+export * from './config';
+export * from './temp';

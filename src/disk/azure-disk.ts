@@ -489,11 +489,11 @@ export class AzureDisk implements FilesystemContract {
 
   // ─── Metadata ────────────────────────────────────────────────────────────────
 
-  async getMetadata(path: string): Promise<FileMetadata> {
+  async getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T> {
     const key = sanitizePath(path);
     try {
       const props = await this.containerClient.getBlobClient(key).getProperties();
-      return {
+      const meta: FileMetadata = {
         path: key,
         size: props.contentLength ?? 0,
         lastModified: props.lastModified ? new Date(props.lastModified) : new Date(),
@@ -504,6 +504,7 @@ export class AzureDisk implements FilesystemContract {
         azure_container: this.config.containerName ?? this.config.bucket,
         ...props.metadata,
       };
+      return meta as unknown as T;
     } catch (e) {
       mapAzureError(e, this.diskName, path);
     }
@@ -720,9 +721,10 @@ export class AzureDisk implements FilesystemContract {
     return !(await this.exists(path));
   }
 
-  async json<T = unknown>(path: string): Promise<T> {
+  async json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T> {
     const content = await this.get(path, { responseType: 'string' });
-    return JSON.parse(content as string);
+    const parsed = JSON.parse(content as string) as unknown;
+    return schema ? schema.parse(parsed) : (parsed as T);
   }
 
   async checksum(path: string, algorithm: ChecksumAlgorithm = 'md5'): Promise<string> {

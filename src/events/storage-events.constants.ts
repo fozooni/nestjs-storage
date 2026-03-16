@@ -5,6 +5,7 @@ export const StorageEvents = {
   COPY: 'storage.copy',
   MOVE: 'storage.move',
   DELETE_MANY: 'storage.deleteMany',
+  RETRY: 'storage.retry',
 } as const;
 
 export type StorageEventName = (typeof StorageEvents)[keyof typeof StorageEvents];

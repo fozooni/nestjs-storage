@@ -12,10 +12,19 @@ import { DigitalOceanDisk } from './disk/digitalocean-disk';
 import { WasabiDisk } from './disk/wasabi-disk';
 import { AzureDisk } from './disk/azure-disk';
 import { EncryptedDisk } from './disk/encrypted-disk';
+import { CachedDisk } from './disk/cached-disk';
+import { RetryDisk } from './disk/retry-disk';
+import { ReplicatedDisk } from './disk/replicated-disk';
+import { CdnDisk } from './disk/cdn-disk';
+import { OtelDisk } from './disk/otel-disk';
+import { QuotaDisk } from './disk/quota-disk';
+import { DiskConfigValidator } from './config/disk-config-validator';
 import { StorageEventsService } from './events/storage-events.service';
 import { StorageEvents } from './events/storage-events.constants';
 import { ScopedDisk } from './disk/scoped-disk';
 import type {
+  CacheBackend,
+  CacheOptions,
   ChecksumAlgorithm,
   CopyOptions,
   DeleteManyResult,
@@ -28,6 +37,10 @@ import type {
   MultipartUploadOptions,
   MultipartUploadPart,
   PutOptions,
+  QuotaOptions,
+  QuotaStore,
+  ReplicationOptions,
+  RetryOptions,
   StorageConfig,
   StorageManager,
   StreamableFileOptions,
@@ -88,7 +101,16 @@ export class StorageService implements StorageManager {
       throw new Error(`Driver [${diskConfig.driver}] not supported.`);
     }
 
-    const disk = driver(diskConfig);
+    // Validate config before constructing
+    DiskConfigValidator.validate(diskName, diskConfig);
+
+    let disk: FilesystemContract = driver(diskConfig);
+
+    // Auto-wrap with CdnDisk when cdn config is present
+    if (diskConfig.cdn) {
+      disk = new CdnDisk(disk, diskConfig.cdn);
+    }
+
     this.disks.set(diskName, disk);
 
     return disk;
@@ -318,8 +340,8 @@ export class StorageService implements StorageManager {
     return this.disk().append(path, data);
   }
 
-  async getMetadata(path: string): Promise<FileMetadata> {
-    return this.disk().getMetadata(path);
+  async getMetadata<T extends FileMetadata = FileMetadata>(path: string): Promise<T> {
+    return this.disk().getMetadata<T>(path);
   }
 
   async mimeType(path: string): Promise<string> {
@@ -396,12 +418,12 @@ export class StorageService implements StorageManager {
     return disk.missing(path);
   }
 
-  async json<T = unknown>(path: string): Promise<T> {
+  async json<T = unknown>(path: string, schema?: { parse(v: unknown): T }): Promise<T> {
     const disk = this.disk();
     if (!disk.json) {
       throw new Error('Disk does not support json()');
     }
-    return disk.json<T>(path);
+    return disk.json<T>(path, schema);
   }
 
   async checksum(path: string, algorithm?: ChecksumAlgorithm): Promise<string> {
@@ -455,6 +477,100 @@ export class StorageService implements StorageManager {
       : Buffer.from(options.key as string, 'hex');
     return new EncryptedDisk(this.disk(diskName), key);
   }
+
+  // ─── v0.0.5 Factory methods ────────────────────────────────────────────────
+
+  /**
+   * Wrap a disk with metadata caching to reduce redundant network calls.
+   *
+   * @param diskName  The configured disk to wrap.
+   * @param opts      Cache options: TTL, per-method TTL overrides, and optional backend.
+   *
+   * @example
+   * ```ts
+   * const disk = storage.cached('s3', { ttl: 60_000 });
+   * await disk.exists('file.txt'); // network call
+   * await disk.exists('file.txt'); // cache hit
+   * ```
+   */
+  cached(diskName: string, opts?: CacheOptions & { backend?: CacheBackend }): FilesystemContract {
+    return new CachedDisk(this.disk(diskName), opts);
+  }
+
+  /**
+   * Wrap a disk with automatic retry using full-jitter exponential backoff.
+   *
+   * @param diskName  The configured disk to wrap.
+   * @param opts      Retry options: maxRetries, baseDelay, maxDelay, factor, jitter, retryOn.
+   *
+   * @example
+   * ```ts
+   * const disk = storage.withRetry('s3', { maxRetries: 5 });
+   * await disk.get('file.txt'); // retries up to 5 times on transient errors
+   * ```
+   */
+  withRetry(diskName: string, opts?: RetryOptions): FilesystemContract {
+    return new RetryDisk(this.disk(diskName), opts, this.storageEvents, diskName);
+  }
+
+  /**
+   * Wrap a disk with write replication to one or more additional disks.
+   *
+   * @param diskName  The primary disk name.
+   * @param replicas  Additional `FilesystemContract` instances to replicate writes to.
+   * @param opts      Replication options: strategy (`'all'` | `'quorum'` | `'async'`).
+   *
+   * @example
+   * ```ts
+   * const disk = storage.replicated('s3', [storage.disk('s3-backup')], { strategy: 'async' });
+   * await disk.put('file.txt', 'data'); // primary resolves, backup writes in background
+   * ```
+   */
+  replicated(
+    diskName: string,
+    replicas: FilesystemContract[],
+    opts?: ReplicationOptions,
+  ): FilesystemContract {
+    return new ReplicatedDisk(this.disk(diskName), replicas, opts);
+  }
+
+  /**
+   * Wrap a disk with OpenTelemetry tracing.
+   *
+   * Requires the optional peer `@opentelemetry/api`. When not installed, this
+   * is a transparent no-op.
+   *
+   * @param diskName  The configured disk to wrap.
+   *
+   * @example
+   * ```ts
+   * const disk = storage.withTracing('s3');
+   * await disk.put('file.txt', 'data'); // creates an OpenTelemetry span
+   * ```
+   */
+  withTracing(diskName: string): FilesystemContract {
+    return new OtelDisk(this.disk(diskName), diskName);
+  }
+
+  /**
+   * Wrap a disk with storage quota enforcement.
+   *
+   * @param diskName    The configured disk to wrap.
+   * @param quotaStore  A `QuotaStore` implementation to track usage.
+   * @param opts        Quota options: `maxBytes` and optional `prefix`.
+   *
+   * @example
+   * ```ts
+   * const store = new MemoryQuotaStore();
+   * const disk = storage.withQuota('local', store, { maxBytes: 100 * 1024 * 1024 });
+   * await disk.put('big.bin', data); // throws StorageQuotaExceededError if > 100 MB
+   * ```
+   */
+  withQuota(diskName: string, quotaStore: QuotaStore, opts: QuotaOptions): FilesystemContract {
+    return new QuotaDisk(this.disk(diskName), quotaStore, opts);
+  }
+
+  // ─── Streamable file for NestJS controllers ────────────────────────────────
 
   // Streamable file for NestJS controllers
   async getStreamableFile(path: string, options?: StreamableFileOptions): Promise<StreamableFile> {

@@ -6,6 +6,109 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.0.5] — 2026-03-16
+
+### Added
+
+#### DiskDecorator Abstract Base
+
+- **`DiskDecorator`** — abstract base class that all decorator disks (`CachedDisk`, `RetryDisk`, `ReplicatedDisk`, `CdnDisk`, `OtelDisk`, `QuotaDisk`) extend. Auto-delegates every `FilesystemContract` method to the wrapped inner disk. Eliminates ~150 lines of passthrough boilerplate per decorator. Optional methods (`initMultipartUpload`, `presignedPost`, etc.) throw a clear `"Disk does not support X"` error when the inner disk does not implement them.
+- `EncryptedDisk` and `ScopedDisk` refactored to extend `DiskDecorator` — only transforming methods remain, passthrough boilerplate removed.
+
+#### CachedDisk Decorator
+
+- **`CachedDisk`** — extends `DiskDecorator`. Caches read-heavy operations: `exists`, `size`, `lastModified`, `mimeType`, `getMetadata`, `getVisibility`. Cache is invalidated on every write (`put`, `putFile`, `delete`, `copy`, `move`, `setVisibility`, `deleteMany`, `deleteDirectory`).
+- **`MemoryCacheBackend`** — built-in `Map`-based `CacheBackend` implementation. Supports per-entry TTL.
+- **`CacheBackend` interface** — `{ get<T>(key): T | undefined; set<T>(key, value, ttlMs?): void; del(key): void; clear(): void }`. Plug in Redis or any other backend.
+- **`CacheOptions`** — `{ ttl?, ttlByMethod? }` — configure global TTL and per-method TTL overrides.
+- `StorageService.cached(diskName, opts?)` factory method.
+- `CachedDisk.clearCache()` — clears the entire cache programmatically.
+- `CachedDisk.cacheBackend` — exposes the underlying backend for advanced use.
+
+#### RetryDisk Decorator
+
+- **`RetryDisk`** — extends `DiskDecorator`. Full-jitter exponential backoff on transient failures. Default: retry on `StorageNetworkError`; skip on `StorageFileNotFoundError`, `StoragePermissionError`, `StorageConfigurationError`.
+- **`RetryOptions`** — `{ maxRetries?, baseDelay?, maxDelay?, factor?, jitter?, retryOn? }`.
+- Custom `retryOn?(err): boolean` predicate for fine-grained retry control.
+- Emits `storage.retry` event via optional `StorageEventsService` injection.
+- `StorageService.withRetry(diskName, opts?)` factory method.
+
+#### ReplicatedDisk Decorator
+
+- **`ReplicatedDisk`** — extends `DiskDecorator`. Propagates writes to multiple replica disks. Reads always served from primary.
+- **`ReplicationOptions.strategy`** — three strategies:
+  - `'all'` (default): `Promise.all` — all replicas must succeed.
+  - `'quorum'`: majority must succeed (`allSettled`); individual replica failures are tolerated.
+  - `'async'`: fire-and-forget replication — write returns as soon as primary succeeds.
+- `StorageService.replicated(diskName, replicas, opts?)` factory method.
+- `ReplicatedDisk.replicaDisks` — exposes the replica list.
+
+#### CdnDisk Decorator
+
+- **`CdnDisk`** — extends `DiskDecorator`. Overrides `url()` to return CDN-prefixed URLs and `temporaryUrl()` to generate CloudFront signed URLs.
+- **`DiskConfig.cdn`** — new optional field: `{ baseUrl, provider?, signingKeyId?, signingKey? }`. When set, `StorageService.disk()` automatically wraps the disk in a `CdnDisk`.
+- CloudFront signed URL support via dynamic `@aws-sdk/cloudfront-signer` import (optional peer — no-op if absent).
+- `CdnDisk.invalidateCdn(paths)` — placeholder for CDN invalidation; override in subclasses.
+- `CdnDisk.cdnConfiguration` — exposes the CDN config.
+
+#### OtelDisk Decorator (OpenTelemetry)
+
+- **`OtelDisk`** — extends `DiskDecorator`. Wraps every async storage operation in an OpenTelemetry span.
+- Span attributes: `storage.disk`, `storage.operation`, `storage.path`.
+- **Zero-overhead no-op** when `@opentelemetry/api` is not installed — graceful degradation via try/require.
+- `StorageService.withTracing(diskName)` factory method.
+- `OtelDisk.isTracingActive` — boolean indicating whether the OTel API is available.
+
+#### QuotaDisk Decorator
+
+- **`QuotaDisk`** — extends `DiskDecorator`. Enforces byte-level storage quotas. Throws `StorageQuotaExceededError` on `put()` when quota is exceeded.
+- **`MemoryQuotaStore`** — built-in in-memory `QuotaStore` implementation (per-prefix usage map).
+- **`QuotaStore` interface** — `{ getUsage(prefix?): Promise<number>; addUsage(prefix, bytes): Promise<void>; removeUsage(prefix, bytes): Promise<void> }`. Redis-ready.
+- **`QuotaOptions`** — `{ maxBytes, prefix? }`.
+- `QuotaDisk.getUsage()` — returns `{ used, limit, percent }`.
+- `StorageService.withQuota(diskName, quotaStore, opts)` factory method.
+
+#### Config Validation
+
+- **`DiskConfigValidator`** — static class that validates disk configs before disk construction. Throws `StorageConfigurationError` with clear messages listing missing fields and the disk name.
+- Required fields per driver: `s3` → `bucket + region`; `r2` → `bucket + accountId`; `gcs` → `bucket`; `minio` → `bucket + endpoint`; `b2` → `bucket + endpoint`; `digitalocean`/`wasabi` → `bucket + region + endpoint`; `azure` → `containerName + (accountKey | sasToken)`.
+- CDN config validation: `cdn.baseUrl` always required; `cloudfront` provider additionally requires `signingKeyId` and `signingKey`.
+- `StorageService.disk()` now runs validation before constructing any disk.
+
+#### Temporary Files with TTL
+
+- **`LocalDisk.putTemp(path, content, ttlSeconds, opts?)`** — writes a file and a `.ttl` sidecar JSON (`{ expiresAt }`) alongside it.
+- **`S3Disk.putTemp(path, content, ttlSeconds, opts?)`** — sets the S3 `Expires` object metadata header for native object expiry.
+- **`DiskDecorator.putTemp()`** — delegates to the inner disk if supported, falls back to plain `put()`.
+- **`StorageTempCleanupService`** — `@Injectable()` NestJS service that scans a `LocalDisk` for expired `.ttl` sidecars and deletes both the sidecar and the original file. Works with `@nestjs/schedule` for scheduled cleanup. Registered in `StorageModule` exports.
+- `StorageTempCleanupService.runOnce(diskName?)` — returns `{ deleted, errors }`.
+
+#### Better TypeScript Generics
+
+- **`getMetadata<T extends FileMetadata = FileMetadata>(path): Promise<T>`** — now generic across the entire `FilesystemContract` interface and all implementations. Callers can cast to driver-specific types without runtime overhead.
+- **`S3FileMetadata`** — extends `FileMetadata` with `etag?`, `storageClass?`, `versionId?`, `serverSideEncryption?`, `s3Metadata?` fields. Returned by `S3Disk.getMetadata()`.
+- **`GcsFileMetadata`** — extends `FileMetadata` with `generation?`, `metageneration?`, `crc32c?`, `md5Hash?` fields. Returned by `GcsDisk.getMetadata()`.
+- **`json<T>(path, schema?): Promise<T>`** — optional Zod-compatible schema `{ parse(v: unknown): T }` parameter added across `LocalDisk`, `S3Disk`, `GcsDisk`, `AzureDisk`, `FakeDisk`, and `DiskDecorator`.
+
+### Changed
+
+- `StorageService.disk()` now runs `DiskConfigValidator.validate()` and auto-wraps with `CdnDisk` when `DiskConfig.cdn` is set.
+- `StorageModule.forRoot()` and `forRootAsync()` now include `StorageTempCleanupService` in providers and exports.
+- `StorageEvents.RETRY` constant added (`'storage.retry'`).
+- `DiskConfig` extended with `cdn?: CdnConfig`.
+
+### New Peer Dependencies (all optional)
+
+| Package | Purpose |
+|---|---|
+| `@aws-sdk/cloudfront-signer@^3.0.0` | CloudFront signed URLs in `CdnDisk` |
+| `@opentelemetry/api@^1.0.0` | Tracing spans in `OtelDisk` |
+| `zod@^3.0.0` | Schema validation in `json<T>()` |
+| `class-validator@^0.14.0` | Future config schema annotations |
+| `class-transformer@^0.5.0` | Future config schema annotations |
+
+---
+
 ## [0.0.4] — 2026-03-16
 
 ### Added

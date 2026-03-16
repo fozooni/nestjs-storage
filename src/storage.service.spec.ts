@@ -344,7 +344,7 @@ describe('StorageService', () => {
 
     it('should proxy json', async () => {
       await service.json('data.json');
-      expect(mockLocalDisk.json).toHaveBeenCalledWith('data.json');
+      expect(mockLocalDisk.json).toHaveBeenCalledWith('data.json', undefined);
     });
 
     it('should proxy checksum', async () => {

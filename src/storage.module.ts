@@ -8,6 +8,7 @@ import {
 import { StorageService } from './storage.service';
 import { StorageEventsService } from './events/storage-events.service';
 import { StorageAuditService } from './audit/storage-audit.service';
+import { StorageTempCleanupService } from './temp/storage-temp.service';
 
 @Global()
 @Module({})
@@ -26,12 +27,14 @@ export class StorageModule {
         },
         StorageService,
         StorageEventsService,
+        StorageTempCleanupService,
         ...auditProviders,
         ...diskProviders,
       ],
       exports: [
         StorageService,
         StorageEventsService,
+        StorageTempCleanupService,
         ...auditProviders,
         ...diskProviders.map((p) => p.provide),
       ],
@@ -52,12 +55,14 @@ export class StorageModule {
         ...asyncProviders,
         StorageService,
         StorageEventsService,
+        StorageTempCleanupService,
         ...auditProviders,
         ...diskProviders,
       ],
       exports: [
         StorageService,
         StorageEventsService,
+        StorageTempCleanupService,
         ...auditProviders,
         ...diskProviders.map((p) => p.provide),
       ],
