@@ -33,6 +33,7 @@ import {
   visibilityToAcl,
 } from '../utils/storage.utils';
 import { S3ClientWrapper } from '../wrapper/s3-client';
+import { ScopedDisk } from './scoped-disk';
 
 export class S3Disk implements FilesystemContract {
   private client: S3ClientWrapper;
@@ -139,27 +140,31 @@ export class S3Disk implements FilesystemContract {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async putFile(path: string, file: any, options?: PutOptions): Promise<string | false> {
     // Handle file upload based on file type
     let contents: Buffer | NodeJS.ReadableStream;
-    let filename: string;
+    let originalName: string;
 
     if (file.buffer) {
       // Express multer file
       contents = file.buffer;
-      filename = file.originalname || file.filename;
+      originalName = file.originalname || file.filename || 'upload';
     } else if (file.path) {
       // File path
       const fs = await import('fs');
       contents = fs.createReadStream(file.path);
-      filename = getFilename(file.path);
+      originalName = getFilename(file.path) || 'upload';
     } else if (isStream(file)) {
       contents = file;
-      filename = options?.filename || 'upload';
+      originalName = options?.filename || 'upload';
     } else {
       contents = Buffer.from(file);
-      filename = options?.filename || 'upload';
+      originalName = options?.filename || 'upload';
     }
+
+    const strategy = options?.namingStrategy ?? this.config.namingStrategy;
+    const filename = strategy ? await strategy.generate(file, originalName) : originalName;
 
     const fullPath = joinPaths(path, filename);
     const success = await this.put(fullPath, contents, options);
@@ -687,6 +692,10 @@ export class S3Disk implements FilesystemContract {
    */
   getBucket(): string {
     return this.client.getBucket();
+  }
+
+  scope(prefix: string): FilesystemContract {
+    return new ScopedDisk(this, prefix);
   }
 
   async missing(path: string): Promise<boolean> {

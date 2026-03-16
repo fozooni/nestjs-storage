@@ -2,7 +2,12 @@ import { StreamableFile } from '@nestjs/common';
 import { Readable } from 'stream';
 
 import { StorageService } from './storage.service';
+import { StorageEventsService } from './events/storage-events.service';
 import type { DiskConfig, FilesystemContract } from './interfaces/storage.interface';
+
+function createMockEventsService(): StorageEventsService {
+  return new StorageEventsService();
+}
 
 // Create a mock FilesystemContract
 function createMockDisk(overrides: Partial<FilesystemContract> = {}): FilesystemContract {
@@ -92,7 +97,7 @@ describe('StorageService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new StorageService(defaultConfig);
+    service = new StorageService(defaultConfig, createMockEventsService());
   });
 
   describe('disk', () => {
@@ -121,7 +126,7 @@ describe('StorageService', () => {
         default: 'custom',
         disks: { custom: { driver: 'unknown' as const } },
       };
-      const svc = new StorageService(config);
+      const svc = new StorageService(config, createMockEventsService());
       expect(() => svc.disk('custom')).toThrow('Driver [unknown] not supported');
     });
   });
@@ -161,7 +166,7 @@ describe('StorageService', () => {
           local: { driver: 'local' as const, root: '/tmp' },
         },
       };
-      const svc = new StorageService(config);
+      const svc = new StorageService(config, createMockEventsService());
       const disk = svc.cloud();
       expect(disk).toBe(mockS3Disk);
     });
@@ -188,7 +193,7 @@ describe('StorageService', () => {
         default: 'custom-disk',
         disks: { 'custom-disk': { driver: 'custom' } },
       };
-      const svc = new StorageService(config);
+      const svc = new StorageService(config, createMockEventsService());
       svc.extend('custom', () => customDisk);
       const disk = svc.disk('custom-disk');
       expect(disk).toBe(customDisk);
@@ -416,7 +421,7 @@ describe('StorageService', () => {
       };
 
       // Access a service with a disk that doesn't support multipart
-      const svc = new StorageService(config);
+      const svc = new StorageService(config, createMockEventsService());
 
       // Manually set the disk to our no-multipart disk
       (svc as any).disks.set('limited', noMultipartDisk);

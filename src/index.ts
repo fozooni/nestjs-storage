@@ -27,3 +27,15 @@ export * from './testing';
 
 // Health
 export * from './health';
+
+// Events
+export * from './events';
+
+// Pipes
+export * from './pipes';
+
+// Naming strategies
+export * from './naming';
+
+// Interceptors
+export * from './interceptors';

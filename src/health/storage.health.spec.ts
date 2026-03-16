@@ -1,3 +1,5 @@
+import { HealthIndicatorService } from '@nestjs/terminus';
+
 import { StorageService } from '../storage.service';
 import { StorageHealthIndicator } from './storage.health';
 
@@ -5,6 +7,16 @@ describe('StorageHealthIndicator', () => {
   let indicator: StorageHealthIndicator;
   let mockDisk: any;
   let mockStorage: jest.Mocked<StorageService>;
+  let mockHealthIndicatorService: jest.Mocked<HealthIndicatorService>;
+
+  const createMockIndicator = (key: string) => ({
+    up: jest.fn().mockImplementation((details?: Record<string, unknown>) => ({
+      [key]: { status: 'up', ...details },
+    })),
+    down: jest.fn().mockImplementation((details?: Record<string, unknown>) => ({
+      [key]: { status: 'down', ...details },
+    })),
+  });
 
   beforeEach(() => {
     mockDisk = {
@@ -17,7 +29,11 @@ describe('StorageHealthIndicator', () => {
       disk: jest.fn().mockReturnValue(mockDisk),
     } as any;
 
-    indicator = new StorageHealthIndicator(mockStorage);
+    mockHealthIndicatorService = {
+      check: jest.fn().mockImplementation((key: string) => createMockIndicator(key)),
+    } as any;
+
+    indicator = new StorageHealthIndicator(mockStorage, mockHealthIndicatorService);
   });
 
   describe('check', () => {

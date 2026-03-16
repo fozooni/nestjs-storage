@@ -1,3 +1,8 @@
+export interface NamingStrategy {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  generate(file: any, originalName: string): string | Promise<string>;
+}
+
 export interface DiskConfig {
   driver: 'local' | 's3' | 'gcs' | 'r2' | (string & {});
   root?: string;
@@ -21,6 +26,9 @@ export interface DiskConfig {
   projectId?: string;
   keyFilename?: string;
   credentials?: Record<string, any>;
+
+  // Naming strategy for file uploads
+  namingStrategy?: NamingStrategy;
 
   // Extensibility for custom drivers
   [key: string]: any;
@@ -47,6 +55,7 @@ export interface PutOptions {
   ContentEncoding?: string;
   ContentLanguage?: string;
   Expires?: Date;
+  namingStrategy?: NamingStrategy;
 }
 
 export interface GetOptions {
@@ -206,6 +215,9 @@ export interface FilesystemContract {
 
   // Storage configuration
   getBucket?(): string | undefined;
+
+  // Scoped disk
+  scope?(prefix: string): FilesystemContract;
 }
 
 export interface StorageManager {
@@ -215,6 +227,7 @@ export interface StorageManager {
   build(config: DiskConfig): FilesystemContract;
   extend(driver: string, callback: (config: DiskConfig) => FilesystemContract): void;
   setDisk(name: string, disk: FilesystemContract): void;
+  scope(prefix: string, diskName?: string): FilesystemContract;
 
   // Proxy methods to default disk
   exists(path: string): Promise<boolean>;

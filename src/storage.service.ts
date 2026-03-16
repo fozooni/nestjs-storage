@@ -6,6 +6,9 @@ import { LocalDisk } from './disk/local-disk';
 import { S3Disk } from './disk/s3-disk';
 import { R2Disk } from './disk/r2-disk';
 import { GcsDisk } from './disk/gcs-disk';
+import { StorageEventsService } from './events/storage-events.service';
+import { StorageEvents } from './events/storage-events.constants';
+import { ScopedDisk } from './disk/scoped-disk';
 import type {
   ChecksumAlgorithm,
   CopyOptions,
@@ -33,7 +36,10 @@ export class StorageService implements StorageManager {
   private defaultDisk: string;
   private config: StorageConfig;
 
-  constructor(@Inject(STORAGE_MODULE_OPTIONS) config: StorageConfig) {
+  constructor(
+    @Inject(STORAGE_MODULE_OPTIONS) config: StorageConfig,
+    private readonly storageEvents: StorageEventsService,
+  ) {
     this.config = config;
     this.defaultDisk = config.default;
 
@@ -42,6 +48,10 @@ export class StorageService implements StorageManager {
     this.registerDriver('s3', (c) => new S3Disk(c));
     this.registerDriver('r2', (c) => new R2Disk(c));
     this.registerDriver('gcs', (c) => new GcsDisk(c));
+  }
+
+  get events(): StorageEventsService {
+    return this.storageEvents;
   }
 
   private registerDriver(name: string, factory: (config: DiskConfig) => FilesystemContract): void {
@@ -129,11 +139,28 @@ export class StorageService implements StorageManager {
     contents: string | Buffer | NodeJS.ReadableStream,
     options?: PutOptions,
   ): Promise<boolean> {
-    return this.disk().put(path, contents, options);
+    const result = await this.disk().put(path, contents, options);
+    if (result) {
+      this.storageEvents.emit(StorageEvents.PUT, {
+        disk: this.defaultDisk,
+        path,
+        timestamp: new Date(),
+      });
+    }
+    return result;
   }
 
   async putFile(path: string, file: any, options?: PutOptions): Promise<string | false> {
-    return this.disk().putFile(path, file, options);
+    const result = await this.disk().putFile(path, file, options);
+    if (result !== false) {
+      this.storageEvents.emit(StorageEvents.PUT_FILE, {
+        disk: this.defaultDisk,
+        path: result,
+        originalname: file?.originalname,
+        timestamp: new Date(),
+      });
+    }
+    return result;
   }
 
   async putFileAs(
@@ -146,15 +173,41 @@ export class StorageService implements StorageManager {
   }
 
   async delete(path: string): Promise<boolean> {
-    return this.disk().delete(path);
+    const result = await this.disk().delete(path);
+    if (result) {
+      this.storageEvents.emit(StorageEvents.DELETE, {
+        disk: this.defaultDisk,
+        path,
+        timestamp: new Date(),
+      });
+    }
+    return result;
   }
 
   async copy(from: string, to: string, options?: CopyOptions): Promise<boolean> {
-    return this.disk().copy(from, to, options);
+    const result = await this.disk().copy(from, to, options);
+    if (result) {
+      this.storageEvents.emit(StorageEvents.COPY, {
+        disk: this.defaultDisk,
+        from,
+        to,
+        timestamp: new Date(),
+      });
+    }
+    return result;
   }
 
   async move(from: string, to: string, options?: MoveOptions): Promise<boolean> {
-    return this.disk().move(from, to, options);
+    const result = await this.disk().move(from, to, options);
+    if (result) {
+      this.storageEvents.emit(StorageEvents.MOVE, {
+        disk: this.defaultDisk,
+        from,
+        to,
+        timestamp: new Date(),
+      });
+    }
+    return result;
   }
 
   async size(path: string): Promise<number> {
@@ -316,7 +369,18 @@ export class StorageService implements StorageManager {
     if (!disk.deleteMany) {
       throw new Error('Disk does not support deleteMany()');
     }
-    return disk.deleteMany(paths);
+    const result = await disk.deleteMany(paths);
+    this.storageEvents.emit(StorageEvents.DELETE_MANY, {
+      disk: this.defaultDisk,
+      succeeded: result.succeeded,
+      failed: result.failed,
+      timestamp: new Date(),
+    });
+    return result;
+  }
+
+  scope(prefix: string, diskName?: string): FilesystemContract {
+    return new ScopedDisk(this.disk(diskName), prefix);
   }
 
   // Streamable file for NestJS controllers

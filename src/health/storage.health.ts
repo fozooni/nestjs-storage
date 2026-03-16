@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { HealthIndicator, HealthIndicatorResult } from '@nestjs/terminus';
+import { HealthIndicatorResult, HealthIndicatorService } from '@nestjs/terminus';
 
 import { StorageService } from '../storage.service';
 
@@ -11,10 +11,11 @@ export interface StorageHealthCheckOptions {
 }
 
 @Injectable()
-export class StorageHealthIndicator extends HealthIndicator {
-  constructor(private readonly storage: StorageService) {
-    super();
-  }
+export class StorageHealthIndicator {
+  constructor(
+    private readonly storage: StorageService,
+    private readonly healthIndicatorService: HealthIndicatorService,
+  ) {}
 
   /**
    * Check a single disk's health by performing a write/read/delete cycle.
@@ -26,6 +27,7 @@ export class StorageHealthIndicator extends HealthIndicator {
   ): Promise<HealthIndicatorResult> {
     const healthCheckFile = options?.healthCheckFile ?? '.storage-health-check';
     const timeout = options?.timeout ?? 5000;
+    const indicator = this.healthIndicatorService.check(key);
 
     try {
       const disk = diskName ? this.storage.disk(diskName) : this.storage.disk();
@@ -36,17 +38,15 @@ export class StorageHealthIndicator extends HealthIndicator {
       );
 
       if (!result.success) {
-        return this.getStatus(key, false, {
+        return indicator.down({
           message: result.error || 'Health check failed',
           disk: diskName || 'default',
         });
       }
 
-      return this.getStatus(key, true, {
-        disk: diskName || 'default',
-      });
+      return indicator.up({ disk: diskName || 'default' });
     } catch (error) {
-      return this.getStatus(key, false, {
+      return indicator.down({
         message: error instanceof Error ? error.message : 'Unknown error',
         disk: diskName || 'default',
       });
@@ -83,7 +83,10 @@ export class StorageHealthIndicator extends HealthIndicator {
       diskStatuses[r.diskName] = r.status;
     }
 
-    return this.getStatus(key, allHealthy, { disks: diskStatuses });
+    const indicator = this.healthIndicatorService.check(key);
+    return allHealthy
+      ? indicator.up({ disks: diskStatuses })
+      : indicator.down({ disks: diskStatuses });
   }
 
   private async performHealthCheck(

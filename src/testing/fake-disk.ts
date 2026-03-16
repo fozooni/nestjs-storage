@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { Readable } from 'stream';
 
+import { ScopedDisk } from '../disk/scoped-disk';
 import type {
   ChecksumAlgorithm,
   CopyOptions,
@@ -426,6 +427,10 @@ export class FakeDisk implements FilesystemContract {
 
   getBucket(): string | undefined {
     return undefined;
+  }
+
+  scope(prefix: string): FilesystemContract {
+    return new ScopedDisk(this, prefix);
   }
 
   // --- Assertion methods ---

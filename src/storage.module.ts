@@ -6,6 +6,7 @@ import {
   StorageModuleOptionsFactory,
 } from './interfaces/storage-module-options.interface';
 import { StorageService } from './storage.service';
+import { StorageEventsService } from './events/storage-events.service';
 
 @Global()
 @Module({})
@@ -22,9 +23,10 @@ export class StorageModule {
           useValue: options,
         },
         StorageService,
+        StorageEventsService,
         ...diskProviders,
       ],
-      exports: [StorageService, ...diskProviders.map((p) => p.provide)],
+      exports: [StorageService, StorageEventsService, ...diskProviders.map((p) => p.provide)],
     };
   }
 
@@ -35,8 +37,8 @@ export class StorageModule {
     return {
       module: StorageModule,
       imports: options.imports || [],
-      providers: [...asyncProviders, StorageService, ...diskProviders],
-      exports: [StorageService, ...diskProviders.map((p) => p.provide)],
+      providers: [...asyncProviders, StorageService, StorageEventsService, ...diskProviders],
+      exports: [StorageService, StorageEventsService, ...diskProviders.map((p) => p.provide)],
     };
   }
 

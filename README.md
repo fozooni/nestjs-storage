@@ -33,6 +33,11 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
 - **Health Checks** — `StorageHealthIndicator` for `@nestjs/terminus` integration
 - **Testing Utilities** — `FakeDisk` in-memory driver and `StorageTestUtils` for tests
 - **Custom Drivers** — Extend with your own storage driver via `extend()`
+- **File Naming Strategies** — Pluggable filename generation: UUID, hash, date-path, or bring your own
+- **StorageFileInterceptor** — Upload and store files in one step, bridging multer to your disk
+- **File Validation Pipes** — `FileExtensionValidator` and `MagicBytesValidator` for `ParseFilePipe`
+- **Storage Events** — Typed event hooks after put/delete/copy/move operations
+- **Scoped Disks** — Path-prefixed disk instances for multi-tenancy (`storage.scope('users/123')`)
 - **Dual CJS/ESM** — Ships both CommonJS and ES modules with TypeScript declarations
 - **Optional Peer Dependencies** — Only install the SDK you need
 
@@ -71,6 +76,11 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
     - [Multiple Disks](#multiple-disks)
     - [Disk by Bucket](#disk-by-bucket)
     - [Custom Drivers](#custom-drivers)
+  - [File Naming Strategies](#file-naming-strategies)
+  - [StorageFileInterceptor](#storagefileinterceptor)
+  - [File Validation Pipes](#file-validation-pipes)
+  - [Storage Events](#storage-events)
+  - [Scoped Disks](#scoped-disks)
   - [Health Checks](#health-checks)
   - [Testing](#testing)
     - [Using FakeDisk](#using-fakedisk)
@@ -97,6 +107,7 @@ If you find this package useful, please consider giving it a star on [GitHub](ht
       - [`FileMetadata`](#filemetadata)
     - [Utility Functions](#utility-functions)
   - [Upgrading from 0.0.1](#upgrading-from-001)
+  - [Upgrading from 0.0.2](#upgrading-from-002)
   - [License](#license)
 
 ## Installation
@@ -687,6 +698,242 @@ StorageModule.forRoot({
 });
 ```
 
+## File Naming Strategies
+
+Control how filenames are generated when calling `putFile()`. Pass a `namingStrategy` option or set a default per disk:
+
+```typescript
+import {
+  UuidNamingStrategy,
+  HashNamingStrategy,
+  DatePathNamingStrategy,
+  OriginalNamingStrategy,
+} from '@fozooni/nestjs-storage';
+
+// UUID — randomUUID() + original extension
+await storage.putFile('uploads', file, { namingStrategy: new UuidNamingStrategy() });
+// => 'uploads/550e8400-e29b-41d4-a716-446655440000.jpg'
+
+// Hash — MD5 of file content + extension
+await storage.putFile('uploads', file, { namingStrategy: new HashNamingStrategy() });
+// => 'uploads/d8e8fca2dc0f896fd7cb4cb0031ba249.jpg'
+
+// Date path — YYYY/MM/DD/uuid + extension
+await storage.putFile('uploads', file, { namingStrategy: new DatePathNamingStrategy() });
+// => 'uploads/2026/03/16/550e8400-e29b-41d4-a716-446655440000.jpg'
+
+// Original — keeps the original filename unchanged
+await storage.putFile('uploads', file, { namingStrategy: new OriginalNamingStrategy() });
+// => 'uploads/photo.jpg'
+```
+
+**Set a disk-level default** in your config:
+
+```typescript
+StorageModule.forRoot({
+  default: 's3',
+  disks: {
+    s3: {
+      driver: 's3',
+      bucket: 'my-bucket',
+      region: 'us-east-1',
+      key: process.env.AWS_ACCESS_KEY_ID,
+      secret: process.env.AWS_SECRET_ACCESS_KEY,
+      namingStrategy: new UuidNamingStrategy(), // default for this disk
+    },
+  },
+});
+```
+
+**Custom strategy** — implement the `NamingStrategy` interface:
+
+```typescript
+import { NamingStrategy } from '@fozooni/nestjs-storage';
+
+class SlugNamingStrategy implements NamingStrategy {
+  generate(file: Express.Multer.File, originalName: string): string {
+    const ext = path.extname(originalName);
+    const slug = originalName.replace(ext, '').toLowerCase().replace(/\s+/g, '-');
+    return `${slug}-${Date.now()}${ext}`;
+  }
+}
+```
+
+## StorageFileInterceptor
+
+Upload a file and store it to a disk in a single step, without manually handling multer:
+
+```bash
+npm install multer
+npm install -D @types/multer
+```
+
+```typescript
+import { Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import {
+  StorageFileInterceptor,
+  StorageFilesInterceptor,
+  StoredFile,
+} from '@fozooni/nestjs-storage';
+
+@Controller('upload')
+export class UploadController {
+  // Single file upload
+  @Post('avatar')
+  @UseInterceptors(
+    StorageFileInterceptor('avatar', {
+      disk: 's3',           // Optional: disk to use (default disk if omitted)
+      path: 'avatars',      // Optional: storage directory
+      namingStrategy: new UuidNamingStrategy(), // Optional (default: UuidNamingStrategy)
+      limits: { fileSize: 5 * 1024 * 1024 },   // Optional: 5 MB limit
+    }),
+  )
+  uploadAvatar(@UploadedFile() file: StoredFile) {
+    return { url: file.url, path: file.path };
+  }
+
+  // Multiple files upload
+  @Post('gallery')
+  @UseInterceptors(
+    StorageFilesInterceptor('photos', 10, { // up to 10 files
+      disk: 's3',
+      path: 'gallery',
+    }),
+  )
+  uploadGallery(@UploadedFile() files: StoredFile[]) {
+    return files.map((f) => ({ url: f.url, path: f.path }));
+  }
+}
+```
+
+The `StoredFile` object returned on `req.file` / `req.files`:
+
+```typescript
+interface StoredFile {
+  path: string;        // Storage path, e.g. 'avatars/uuid.jpg'
+  url: string;         // Public URL from disk.url(path)
+  size: number;        // File size in bytes
+  mimetype: string;    // MIME type
+  originalname: string; // Original filename
+  disk: string;        // Disk name used ('default' if none specified)
+}
+```
+
+## File Validation Pipes
+
+Use with NestJS's `ParseFilePipe` to validate uploaded files:
+
+```typescript
+import { FileExtensionValidator, MagicBytesValidator } from '@fozooni/nestjs-storage';
+import { ParseFilePipe, UploadedFile } from '@nestjs/common';
+
+@Post('upload')
+@UseInterceptors(FileInterceptor('file'))
+async upload(
+  @UploadedFile(
+    new ParseFilePipe({
+      validators: [
+        // Allow only these extensions (case-insensitive)
+        new FileExtensionValidator({ allowedExtensions: ['.jpg', '.jpeg', '.png', '.gif'] }),
+
+        // Verify actual file contents via magic bytes (prevents extension spoofing)
+        new MagicBytesValidator({ allowedTypes: ['image/jpeg', 'image/png', 'image/gif'] }),
+      ],
+    }),
+  )
+  file: Express.Multer.File,
+) { ... }
+```
+
+**`FileExtensionValidator`** — Checks the file extension from `originalname` against a whitelist. Extensions are matched case-insensitively. Leading dot is optional: `'.jpg'` and `'jpg'` both work.
+
+**`MagicBytesValidator`** — Reads the first bytes of `file.buffer` and compares against a built-in signatures map. No external dependencies. Supported types include:
+
+| Magic bytes | Type |
+|-------------|------|
+| `ffd8ff` | `image/jpeg` |
+| `89504e47` | `image/png` |
+| `47494638` | `image/gif` |
+| `25504446` | `application/pdf` |
+| `504b0304` | `application/zip` |
+| `52494646` | `image/webp` |
+| `424d` | `image/bmp` |
+| `00000100` | `image/x-icon` |
+
+## Storage Events
+
+Subscribe to typed events after file operations — useful for audit logs, CDN invalidation, or triggering downstream processes:
+
+```typescript
+import { StorageEvents, StorageEventsService } from '@fozooni/nestjs-storage';
+
+// Inject StorageEventsService
+@Injectable()
+export class AuditService {
+  constructor(private readonly storageEvents: StorageEventsService) {
+    this.storageEvents.on(StorageEvents.PUT, (event) => {
+      console.log(`File stored: ${event.disk}/${event.path} at ${event.timestamp}`);
+    });
+
+    this.storageEvents.on(StorageEvents.DELETE, (event) => {
+      console.log(`File deleted: ${event.disk}/${event.path}`);
+    });
+
+    // One-time listener
+    this.storageEvents.once(StorageEvents.COPY, (event) => {
+      console.log(`Copied: ${event.from} → ${event.to}`);
+    });
+  }
+}
+```
+
+Or access events via `storageService.events`:
+
+```typescript
+storageService.events.on(StorageEvents.PUT, (event) => { ... });
+storageService.events.off(StorageEvents.PUT, handler);
+```
+
+**Available events and payloads:**
+
+| Event constant | Emitted after | Payload fields |
+|---|---|---|
+| `StorageEvents.PUT` | `put()` | `disk`, `path`, `timestamp` |
+| `StorageEvents.PUT_FILE` | `putFile()` | `disk`, `path`, `originalname`, `timestamp` |
+| `StorageEvents.DELETE` | `delete()` | `disk`, `path`, `timestamp` |
+| `StorageEvents.COPY` | `copy()` | `disk`, `from`, `to`, `timestamp` |
+| `StorageEvents.MOVE` | `move()` | `disk`, `from`, `to`, `timestamp` |
+| `StorageEvents.DELETE_MANY` | `deleteMany()` | `disk`, `succeeded`, `failed`, `timestamp` |
+
+`StorageEventsService` is exported from `StorageModule` — inject it directly in your services.
+
+**Optional `@nestjs/event-emitter` bridge**: If you have `EventEmitter2` configured, events will also flow through it automatically (zero config).
+
+## Scoped Disks
+
+Create a path-prefixed disk instance for multi-tenancy or per-user isolation:
+
+```typescript
+// From StorageService
+const userDisk = storageService.scope(`users/${userId}`);
+const userDisk = storageService.scope(`users/${userId}`, 's3'); // specific disk
+
+// From an injected disk
+const userDisk = s3Disk.scope(`users/${userId}`);
+
+// All operations are transparently prefixed
+await userDisk.put('avatar.jpg', buffer);        // writes to: users/123/avatar.jpg
+await userDisk.get('avatar.jpg');                 // reads from: users/123/avatar.jpg
+await userDisk.delete('avatar.jpg');              // deletes: users/123/avatar.jpg
+const files = await userDisk.files();             // lists files under users/123/ (prefix stripped)
+
+// Nested scopes
+const orgDisk = storageService.scope('org/acme');
+const teamDisk = orgDisk.scope('team/eng');       // prefix: org/acme/team/eng
+```
+
+`ScopedDisk` implements the full `FilesystemContract` — every method works as expected, paths are prepended transparently, and listed paths have the prefix stripped so callers see relative paths.
+
 ## Health Checks
 
 Integrate with `@nestjs/terminus` for storage health monitoring:
@@ -891,6 +1138,7 @@ interface PutOptions {
   ContentEncoding?: string;
   ContentLanguage?: string;
   Expires?: Date;
+  namingStrategy?: NamingStrategy; // File naming strategy for putFile() calls
 }
 ```
 
@@ -1073,6 +1321,25 @@ npm install @fozooni/nestjs-storage@0.0.2
 - `getStreamableFile()` — Stream files directly from NestJS controllers
 
 **For custom driver authors:** New convenience methods (`missing`, `json`, `checksum`, `deleteMany`) are **optional** on `FilesystemContract`. Your existing custom drivers will continue to work without changes. To support the new methods, implement them on your driver class.
+
+## Upgrading from 0.0.2
+
+v0.0.3 is a **non-breaking** upgrade. All existing APIs remain unchanged.
+
+```bash
+npm install @fozooni/nestjs-storage@0.0.3
+```
+
+**What's new:**
+
+- **File Naming Strategies** — `UuidNamingStrategy`, `HashNamingStrategy`, `DatePathNamingStrategy`, `OriginalNamingStrategy`. Pass via `putFile(path, file, { namingStrategy })` or set per-disk in config.
+- **`StorageFileInterceptor` / `StorageFilesInterceptor`** — Upload and store files in one step (requires `multer` to be installed).
+- **`FileExtensionValidator`** — Validates file extensions in `ParseFilePipe` validators.
+- **`MagicBytesValidator`** — Validates actual file content via magic bytes in `ParseFilePipe` validators.
+- **`StorageEventsService`** — Subscribe to typed events after `put`, `delete`, `copy`, `move`, and `deleteMany` operations.
+- **Scoped Disks** — `storage.scope('prefix')` / `disk.scope('prefix')` for path-prefixed disk instances.
+
+**For custom driver authors:** New `scope?(prefix: string): FilesystemContract` is an optional addition to `FilesystemContract`. Existing custom drivers are unaffected; add `scope()` if you want scoping support on your driver.
 
 ## License
 

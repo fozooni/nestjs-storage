@@ -19,6 +19,7 @@ import {
   PutOptions,
   TemporaryUrlOptions,
 } from '../interfaces/storage.interface';
+import { ScopedDisk } from './scoped-disk';
 import {
   encodeS3Key,
   getContentType,
@@ -120,23 +121,26 @@ export class LocalDisk implements FilesystemContract {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async putFile(path: string, file: any, options?: PutOptions): Promise<string | false> {
     let contents: Buffer | NodeJS.ReadableStream;
-    let filename: string;
+    let originalName: string;
 
     if (file.buffer) {
       // Express multer file
       contents = file.buffer;
-      filename = file.originalname || file.filename;
+      originalName = file.originalname || file.filename || 'upload';
     } else if (file.path) {
       // File path
       contents = createReadStream(file.path);
-      filename = getFilename(file.path);
+      originalName = getFilename(file.path) || 'upload';
     } else if (isStream(file)) {
       contents = file;
-      filename = 'upload';
+      originalName = 'upload';
     } else {
       contents = Buffer.from(file);
-      filename = 'upload';
+      originalName = 'upload';
     }
+
+    const strategy = options?.namingStrategy ?? this.config.namingStrategy;
+    const filename = strategy ? await strategy.generate(file, originalName) : originalName;
 
     const fullPath = joinPaths(path, filename);
     const success = await this.put(fullPath, contents, options);
@@ -468,6 +472,10 @@ export class LocalDisk implements FilesystemContract {
    */
   getBucket(): string | undefined {
     return undefined;
+  }
+
+  scope(prefix: string): FilesystemContract {
+    return new ScopedDisk(this, prefix);
   }
 
   async missing(path: string): Promise<boolean> {
