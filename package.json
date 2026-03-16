@@ -1,6 +1,6 @@
 {
   "name": "@fozooni/nestjs-storage",
-  "version": "0.0.3",
+  "version": "0.0.31",
   "description": "NestJS storage module with a unified API for Local, Amazon S3, Cloudflare R2, and Google Cloud Storage drivers",
   "author": "Fozooni",
   "license": "MIT",
