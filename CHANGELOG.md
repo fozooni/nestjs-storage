@@ -60,6 +60,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 - `auditLog: true` in `StorageModule.forRoot()` options — enables audit logging
 - `StorageService` calls `auditService?.log(...)` after every mutating proxy method (`put`, `putFile`, `delete`, `copy`, `move`, `deleteMany`)
 
+#### Build Optimisation
+
+- esbuild minification enabled (`minify: true`) — JS bundles reduced by ~51% (168 KB → 82 KB CJS, 163 KB → 81 KB ESM)
+- esbuild tree-shaking enabled (`treeshake: true`) — dead code eliminated at build time
+- `keepNames: true` — class and function names preserved for NestJS DI compatibility
+- Build target updated to `node18` — avoids unnecessary ES2021 → ES5 down-transpilation, allowing more efficient output
+- Source map files (`.map`) excluded from the published npm package via `files` field — npm install size reduced from ~1.1 MB to ~283 KB (**74% smaller**)
+- Source maps are still generated locally for development and debugging
+
 ### Changed
 
 - `DiskConfig.driver` union type extended to include `'minio' | 'b2' | 'digitalocean' | 'wasabi' | 'azure'`
