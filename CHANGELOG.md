@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.0.31] — 2026-03-16
+
+### Fixed
+
+- **`StorageHealthIndicator.checkDisks()` race condition** — `Promise.all` caused concurrent health checks to interleave `put`/`get` calls on the same disk, making the content-match assertion flaky (particularly on Node 20 in CI). Health checks are now run sequentially, ensuring each disk's write completes before its read.
+
+---
+
 ## [0.0.3] — 2026-03-16
 
 ### Added
@@ -164,6 +172,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+[0.0.31]: https://github.com/fozooni/nestjs-storage/compare/v0.0.3...v0.0.31
 [0.0.3]: https://github.com/fozooni/nestjs-storage/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/fozooni/nestjs-storage/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/fozooni/nestjs-storage/releases/tag/v0.0.1
