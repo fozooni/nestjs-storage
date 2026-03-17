@@ -296,10 +296,10 @@ Options for `CachedDisk`.
 
 ```ts
 interface CacheOptions {
-  /** Default TTL in seconds for all cached methods */
+  /** Default TTL in milliseconds for all cached methods */
   ttl?: number;
 
-  /** Per-method TTL overrides in seconds */
+  /** Per-method TTL overrides in milliseconds */
   ttlByMethod?: Partial<Record<string, number>>;
 
   /** Custom cache backend (defaults to in-memory Map) */

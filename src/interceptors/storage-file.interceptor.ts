@@ -4,10 +4,12 @@ import {
   ExecutionContext,
   CallHandler,
   mixin,
+  Optional,
   Type,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
+import { StorageAuditService } from '../audit/storage-audit.service';
 import { StorageService } from '../storage.service';
 import type { NamingStrategy } from '../interfaces/storage.interface';
 import { UuidNamingStrategy } from '../naming/uuid-naming-strategy';
@@ -50,7 +52,10 @@ export function StorageFileInterceptor(
 ): Type<NestInterceptor> {
   @Injectable()
   class StorageFileInterceptorClass implements NestInterceptor {
-    constructor(private readonly storageService: StorageService) {}
+    constructor(
+      private readonly storageService: StorageService,
+      @Optional() private readonly auditService?: StorageAuditService,
+    ) {}
 
     async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
       const ctx = context.switchToHttp();
@@ -65,15 +70,45 @@ export function StorageFileInterceptor(
         return next.handle();
       }
 
+      const diskName = options.disk ?? 'default';
       const disk = this.storageService.disk(options.disk);
       const strategy = options.namingStrategy ?? new UuidNamingStrategy();
-      const storedPath = await disk.putFile(options.path ?? '', req.file, {
-        namingStrategy: strategy,
-      });
+
+      let storedPath: string | false;
+      try {
+        storedPath = await disk.putFile(options.path ?? '', req.file, {
+          namingStrategy: strategy,
+        });
+      } catch (error) {
+        this.auditService?.log({
+          operation: 'putFile',
+          disk: diskName,
+          path: options.path ?? '',
+          timestamp: new Date(),
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        throw error;
+      }
 
       if (storedPath === false) {
+        this.auditService?.log({
+          operation: 'putFile',
+          disk: diskName,
+          path: options.path ?? '',
+          timestamp: new Date(),
+          success: false,
+        });
         throw new Error('Failed to store uploaded file');
       }
+
+      this.auditService?.log({
+        operation: 'putFile',
+        disk: diskName,
+        path: storedPath,
+        timestamp: new Date(),
+        success: true,
+      });
 
       const storedFile: StoredFile = {
         path: storedPath,
@@ -81,7 +116,7 @@ export function StorageFileInterceptor(
         size: req.file.size,
         mimetype: req.file.mimetype,
         originalname: req.file.originalname,
-        disk: options.disk ?? 'default',
+        disk: diskName,
       };
 
       req.file = storedFile;

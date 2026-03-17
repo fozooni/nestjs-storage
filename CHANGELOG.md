@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.1.2] — 2026-03-17
+
+### Fixed
+
+- **`@nestjs/terminus` is now truly optional** — `StorageHealthIndicator` previously imported `@nestjs/terminus` at the top level, causing a runtime crash for users who didn't install it. The import is now lazy (`require()` in a try/catch) so the package loads cleanly without terminus. Users who want health checks still get full functionality by installing `@nestjs/terminus`.
+- **Audit logging now works with `StorageFileInterceptor` and `StorageFilesInterceptor`** — both interceptors previously called `disk.putFile()` directly, bypassing the audit logging in `StorageService`. They now inject `StorageAuditService` (via `@Optional()`) and emit audit entries for every upload when `auditLog: true` is enabled.
+- **Documentation: `temporaryUrl()` timing units corrected** — multiple examples in `docs/guide/urls-and-downloads.md` incorrectly labelled the `expiration` parameter as "minutes" when the API expects **seconds**. All examples, variable names, and comments now correctly reflect seconds.
+- **Documentation: `presignedPost()` examples fixed** — examples passed expiration as a positional argument instead of using the `PresignedPostOptions.expires` field. Corrected to use the options object with explicit `expires` in seconds.
+- **Documentation: `CacheOptions` TTL unit corrected** — `docs/api/interfaces.md` documented `ttl` and `ttlByMethod` as "seconds" but the implementation uses **milliseconds**. Fixed to say "milliseconds".
+- **Documentation: `temporaryUrl()` signature in `llm-full.md`** — was missing the `| number` union on the `expiration` parameter. Now shows `Date | number` with a comment clarifying seconds.
+- **Documentation: `filesystem-contract.md`** — `temporaryUrl` entry now shows both `Date` and `number` overloads with the `options` parameter.
+
+---
+
 ## [0.1.1] — 2026-03-17
 
 ### Added

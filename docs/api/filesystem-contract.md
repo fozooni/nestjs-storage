@@ -250,17 +250,20 @@ const publicUrl = await disk.url('images/logo.png');
 
 ---
 
-#### `temporaryUrl(path, expiresInSeconds)`
+#### `temporaryUrl(path, expiration)`
 
-Returns a signed URL that expires after the given number of seconds.
+Returns a signed URL that expires after the given number of **seconds**, or at a specific `Date`.
 
 ```ts
-temporaryUrl(path: string, expiresInSeconds: number): Promise<string>;
+temporaryUrl(path: string, expiration: Date | number, options?: TemporaryUrlOptions): Promise<string>;
 ```
 
 ```ts
+// Expire in 1 hour (3600 seconds)
 const signedUrl = await disk.temporaryUrl('private/report.pdf', 3600);
-// 'https://my-bucket.s3.amazonaws.com/private/report.pdf?X-Amz-...'
+
+// Expire at a specific date
+const signedUrl = await disk.temporaryUrl('private/report.pdf', new Date('2026-03-18T00:00:00Z'));
 ```
 
 ### Content Modification

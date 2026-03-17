@@ -359,7 +359,8 @@ directorySize(directory?: string): Promise<number>
 getVisibility(path: string): Promise<'private' | 'public'>
 setVisibility(path: string, visibility: 'private' | 'public'): Promise<boolean>
 url(path: string): string
-temporaryUrl(path: string, expiration: Date, options?: TemporaryUrlOptions): Promise<string>
+temporaryUrl(path: string, expiration: Date | number, options?: TemporaryUrlOptions): Promise<string>
+// expiration: Date object or number of **seconds**
 ```
 
 ### Metadata
@@ -498,7 +499,7 @@ encrypted(diskName: string, options: { key: string | Buffer }): FilesystemContra
 // key: 32-byte AES-256-GCM key (hex string or Buffer)
 
 cached(diskName: string, options?: CacheOptions): FilesystemContract
-// CacheOptions: { ttl?, ttlByMethod?: { exists?, size?, lastModified?, mimeType?, getMetadata?, getVisibility? } }
+// CacheOptions: { ttl?, ttlByMethod?: { exists?, size?, lastModified?, mimeType?, getMetadata?, getVisibility? } } — all in ms
 
 withRetry(diskName: string, options?: RetryOptions): FilesystemContract
 // RetryOptions: { maxRetries=3, baseDelay=100, maxDelay=10000, factor=2, jitter=true, retryOn? }
@@ -1398,7 +1399,7 @@ interface ArchiverOptions { format?: 'zip' | 'tar'; zlib?: { level?: number } }
 
 // Caching
 interface CacheBackend { get<T>(key: string): T | undefined; set<T>(key: string, value: T, ttlMs?: number): void; del(key: string): void; clear(): void }
-interface CacheOptions { ttl?: number; ttlByMethod?: { exists?: number; size?: number; lastModified?: number; mimeType?: number; getMetadata?: number; getVisibility?: number } }
+interface CacheOptions { ttl?: number; ttlByMethod?: { exists?: number; size?: number; lastModified?: number; mimeType?: number; getMetadata?: number; getVisibility?: number } } // all TTL values in milliseconds
 
 // Retry
 interface RetryOptions { maxRetries?: number; baseDelay?: number; maxDelay?: number; factor?: number; jitter?: boolean; retryOn?: (err: unknown) => boolean }

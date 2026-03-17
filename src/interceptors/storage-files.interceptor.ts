@@ -4,10 +4,12 @@ import {
   ExecutionContext,
   CallHandler,
   mixin,
+  Optional,
   Type,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 
+import { StorageAuditService } from '../audit/storage-audit.service';
 import { StorageService } from '../storage.service';
 import type { NamingStrategy } from '../interfaces/storage.interface';
 import { UuidNamingStrategy } from '../naming/uuid-naming-strategy';
@@ -37,7 +39,10 @@ export function StorageFilesInterceptor(
 ): Type<NestInterceptor> {
   @Injectable()
   class StorageFilesInterceptorClass implements NestInterceptor {
-    constructor(private readonly storageService: StorageService) {}
+    constructor(
+      private readonly storageService: StorageService,
+      @Optional() private readonly auditService?: StorageAuditService,
+    ) {}
 
     async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
       const ctx = context.switchToHttp();
@@ -53,23 +58,51 @@ export function StorageFilesInterceptor(
         return next.handle();
       }
 
+      const diskName = options.disk ?? 'default';
       const disk = this.storageService.disk(options.disk);
       const strategy: NamingStrategy = options.namingStrategy ?? new UuidNamingStrategy();
       const storedFiles: StoredFile[] = [];
 
       for (const file of req.files) {
-        const storedPath = await disk.putFile(options.path ?? '', file, {
-          namingStrategy: strategy,
-        });
-        if (storedPath !== false) {
-          storedFiles.push({
-            path: storedPath,
-            url: disk.url(storedPath),
-            size: file.size,
-            mimetype: file.mimetype,
-            originalname: file.originalname,
-            disk: options.disk ?? 'default',
+        try {
+          const storedPath = await disk.putFile(options.path ?? '', file, {
+            namingStrategy: strategy,
           });
+          if (storedPath !== false) {
+            this.auditService?.log({
+              operation: 'putFile',
+              disk: diskName,
+              path: storedPath,
+              timestamp: new Date(),
+              success: true,
+            });
+            storedFiles.push({
+              path: storedPath,
+              url: disk.url(storedPath),
+              size: file.size,
+              mimetype: file.mimetype,
+              originalname: file.originalname,
+              disk: diskName,
+            });
+          } else {
+            this.auditService?.log({
+              operation: 'putFile',
+              disk: diskName,
+              path: options.path ?? '',
+              timestamp: new Date(),
+              success: false,
+            });
+          }
+        } catch (error) {
+          this.auditService?.log({
+            operation: 'putFile',
+            disk: diskName,
+            path: options.path ?? '',
+            timestamp: new Date(),
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+          throw error;
         }
       }
 

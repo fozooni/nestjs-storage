@@ -37,10 +37,16 @@ For S3-compatible drivers, `url()` generates the standard public URL. If you nee
 Generate a time-limited signed URL that grants temporary access to a private file:
 
 ```typescript
-// Expire in 60 minutes
+// Expire in 60 seconds
 const signedUrl = await disk.temporaryUrl(
   'reports/confidential.pdf',
-  60, // minutes
+  60, // seconds
+);
+
+// Expire in 30 minutes
+const signedUrl = await disk.temporaryUrl(
+  'reports/confidential.pdf',
+  30 * 60, // 1800 seconds
 );
 
 // Expire at a specific date
@@ -62,13 +68,13 @@ export class FilesController {
   @Get(':path(*)/signed-url')
   async getSignedUrl(
     @Param('path') path: string,
-    @Query('expires') expiresInMinutes: number = 60,
+    @Query('expires') expiresInSeconds: number = 3600,
   ) {
     const url = await this.storage
       .disk('s3')
-      .temporaryUrl(path, expiresInMinutes);
+      .temporaryUrl(path, expiresInSeconds);
 
-    return { url, expiresIn: `${expiresInMinutes} minutes` };
+    return { url, expiresIn: `${expiresInSeconds} seconds` };
   }
 }
 ```
@@ -82,7 +88,7 @@ Presigned URLs are supported on S3-compatible drivers and GCS. They require `@aw
 You can pass additional options to control the signed URL behavior:
 
 ```typescript
-const url = await disk.temporaryUrl('file.pdf', 30, {
+const url = await disk.temporaryUrl('file.pdf', 30 * 60, { // 30 minutes
   ResponseContentDisposition: 'attachment; filename="download.pdf"',
   ResponseContentType: 'application/pdf',
 });
@@ -113,8 +119,8 @@ StorageModule.forRoot({
 ### Generating Signed URLs
 
 ```typescript
-// This creates an HMAC-signed URL with expiration
-const signedUrl = await localDisk.temporaryUrl('private/invoice.pdf', 30);
+// This creates an HMAC-signed URL that expires in 30 minutes (1800 seconds)
+const signedUrl = await localDisk.temporaryUrl('private/invoice.pdf', 1800);
 // => 'http://localhost:3000/storage/private/invoice.pdf?expires=1710720000&signature=abc123...'
 ```
 
@@ -162,7 +168,8 @@ export class UploadsController {
   ): Promise<PresignedPostData> {
     const path = `uploads/${crypto.randomUUID()}/${filename}`;
 
-    return this.storage.disk('s3').presignedPost(path, 60, {
+    return this.storage.disk('s3').presignedPost(path, {
+      expires: 60, // 60 seconds
       contentType,
       maxSize: 10 * 1024 * 1024, // 10 MB limit
     });
@@ -371,8 +378,8 @@ For private content served through CloudFront, configure the CloudFront provider
 ```
 
 ```typescript
-// Generates a CloudFront signed URL
-const signedUrl = await disk.temporaryUrl('private/video.mp4', 120);
+// Generates a CloudFront signed URL (expires in 2 minutes)
+const signedUrl = await disk.temporaryUrl('private/video.mp4', 120); // 120 seconds
 // => 'https://d1234.cloudfront.net/private/video.mp4?Expires=...&Signature=...&Key-Pair-Id=...'
 ```
 
@@ -406,12 +413,12 @@ export class AssetsController {
   @Get('private/:path(*)')
   async privateUrl(
     @Param('path') path: string,
-    @Query('ttl') ttl: number = 60,
+    @Query('ttl') ttl: number = 3600, // seconds (default: 1 hour)
   ) {
     const url = await this.storage
       .disk('s3')
       .temporaryUrl(`private/${path}`, ttl);
-    return { url, expiresIn: `${ttl} minutes` };
+    return { url, expiresIn: `${ttl} seconds` };
   }
 
   // Presigned POST for direct client uploads
@@ -423,7 +430,7 @@ export class AssetsController {
     const key = `uploads/${Date.now()}/${filename}`;
     const post = await this.storage
       .disk('s3')
-      .presignedPost(key, 15, { contentType });
+      .presignedPost(key, { expires: 900, contentType }); // 15 minutes
     return { ...post, key };
   }
 }

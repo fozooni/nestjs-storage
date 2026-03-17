@@ -125,6 +125,7 @@ await storage.directorySize()                 // total bytes
 
 // URLs
 storage.url('image.jpg')                      // public URL
+await storage.temporaryUrl('file.pdf', 3600)  // seconds
 await storage.temporaryUrl('file.pdf', new Date(Date.now() + 3600_000))
 
 // Streaming for NestJS controllers
@@ -449,8 +450,9 @@ const bigFile = StorageTestUtils.fakeFileWithSize(5 * 1024 * 1024, 'big.jpg');
 // Config
 { driver: 'local', root: './storage', signSecret: 'at-least-32-chars-secret' }
 
-// Generate
-const url = await storage.temporaryUrl('private/file.pdf', new Date(Date.now() + 3600_000));
+// Generate (expiration in seconds or Date)
+const url = await storage.temporaryUrl('private/file.pdf', 3600); // 1 hour in seconds
+// or: await storage.temporaryUrl('private/file.pdf', new Date(Date.now() + 3600_000));
 
 // Middleware — validate in your NestJS app
 export class AppModule implements NestModule {

@@ -1,7 +1,20 @@
-import { Injectable } from '@nestjs/common';
-import { HealthIndicatorResult, HealthIndicatorService } from '@nestjs/terminus';
+import { Inject, Injectable } from '@nestjs/common';
+import type { HealthIndicatorResult } from '@nestjs/terminus';
 
 import { StorageService } from '../storage.service';
+
+/**
+ * Lazily resolve HealthIndicatorService from @nestjs/terminus so the package
+ * doesn't blow up at import time when terminus isn't installed.
+ */
+const HealthIndicatorServiceToken: any = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('@nestjs/terminus').HealthIndicatorService;
+  } catch {
+    return Symbol.for('HealthIndicatorService');
+  }
+})();
 
 export interface StorageHealthCheckOptions {
   /** File path used for the health check write/read/delete cycle. */
@@ -14,7 +27,8 @@ export interface StorageHealthCheckOptions {
 export class StorageHealthIndicator {
   constructor(
     private readonly storage: StorageService,
-    private readonly healthIndicatorService: HealthIndicatorService,
+    @Inject(HealthIndicatorServiceToken)
+    private readonly healthIndicatorService: any,
   ) {}
 
   /**
