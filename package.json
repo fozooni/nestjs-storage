@@ -1,6 +1,6 @@
 {
   "name": "@fozooni/nestjs-storage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NestJS storage module with a unified API for Local, S3, R2, GCS, MinIO, Azure, B2, DigitalOcean Spaces, and Wasabi drivers",
   "author": "Fozooni",
   "license": "MIT",
@@ -53,36 +53,41 @@
     "dist/**/*.js",
     "dist/**/*.mjs",
     "dist/**/*.d.ts",
-    "dist/**/*.d.mts"
+    "dist/**/*.d.mts",
+    "llm.md",
+    "llm-full.md"
   ],
   "scripts": {
     "build": "tsup",
     "test": "jest --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "mime-types": "^2.1.35"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
-    "@aws-sdk/s3-request-presigner": "^3.0.0",
-    "@aws-sdk/s3-presigned-post": "^3.0.0",
     "@aws-sdk/cloudfront-signer": "^3.0.0",
+    "@aws-sdk/s3-presigned-post": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@azure/storage-blob": "^12.0.0",
     "@google-cloud/storage": "^7.0.0",
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0",
     "@nestjs/terminus": "^10.0.0 || ^11.0.0",
     "@opentelemetry/api": "^1.0.0",
+    "archiver": "^7.0.0",
     "class-transformer": "^0.5.0",
     "class-validator": "^0.14.0",
     "multer": "^1.4.5 || ^2.0.0",
     "reflect-metadata": "^0.1.13 || ^0.2.0",
     "rxjs": "^7.0.0",
-    "zod": "^3.0.0",
-    "archiver": "^7.0.0"
+    "zod": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
@@ -127,8 +132,8 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
-    "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@aws-sdk/s3-presigned-post": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@azure/storage-blob": "^12.0.0",
     "@google-cloud/storage": "^7.0.0",
     "@nestjs/common": "^11.0.0",
@@ -136,12 +141,14 @@
     "@nestjs/terminus": "^11.1.1",
     "@nestjs/testing": "^11.0.0",
     "@swc/core": "^1.15.18",
+    "@types/archiver": "^6.0.0",
     "@types/jest": "^29.5.0",
     "@types/mime-types": "^2.1.4",
     "@types/multer": "^2.1.0",
     "@types/node": "^25.5.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "archiver": "^7.0.0",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
@@ -153,7 +160,6 @@
     "ts-jest": "^29.2.0",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0",
-    "archiver": "^7.0.0",
-    "@types/archiver": "^6.0.0"
+    "vitepress": "2.0.0-alpha.16"
   }
 }

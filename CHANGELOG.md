@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and
 
 ---
 
+## [0.1.1] — 2026-03-17
+
+### Added
+
+- **`llm.md` and `llm-full.md` shipped inside the npm package** — these AI-ready reference files are now included in `node_modules/@fozooni/nestjs-storage/` when you install the package. AI coding agents (Cursor, Claude Code, Antigravity, GitHub Copilot, Windsurf, etc.) can directly reference them from `node_modules` for full package context without any manual setup.
+  - `llm.md` — compact quick-reference covering install, config, all drivers, core operations, decorator factories, and common patterns (~460 lines).
+  - `llm-full.md` — complete API surface with every interface, method signature, option, and migration guide.
+
+### Changed
+
+- **`package.json` `files` field** — `llm.md` and `llm-full.md` were already listed but are now documented as an intentional feature for AI agent consumption.
+- **VitePress documentation site** — comprehensive documentation added at `https://fozooni.github.io/nestjs-storage/` with 57 pages covering all drivers, decorators, services, advanced topics, and API reference. Includes a dedicated [LLM Documentation guide](https://fozooni.github.io/nestjs-storage/guide/llm-docs) explaining how to use the reference files with various AI tools.
+- **README.md** — streamlined to a concise overview with links to the full documentation site.
+- **GitHub Actions** — added `docs.yml` workflow for automatic deployment to GitHub Pages on push to `main`.
+
+---
+
 ## [0.1.0] — 2026-03-16
 
 ### Added
@@ -474,6 +491,9 @@ interface ArchiverOptions { format?, zlib? }
 
 ---
 
+[0.1.1]: https://github.com/fozooni/nestjs-storage/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/fozooni/nestjs-storage/compare/v0.0.5...v0.1.0
+[0.0.5]: https://github.com/fozooni/nestjs-storage/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/fozooni/nestjs-storage/compare/v0.0.31...v0.0.4
 [0.0.31]: https://github.com/fozooni/nestjs-storage/compare/v0.0.3...v0.0.31
 [0.0.3]: https://github.com/fozooni/nestjs-storage/compare/v0.0.2...v0.0.3
